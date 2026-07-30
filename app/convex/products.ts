@@ -59,10 +59,16 @@ export const update = mutation({
     name: v.optional(v.string()),
     sellingPrice: v.optional(v.number()),
     quantityOnHand: v.optional(v.number()),
-    lowStockThreshold: v.optional(v.number()),
+    // null clears the per-product override back to the global default;
+    // omitted leaves the existing value untouched (Convex drops `undefined`
+    // args before the mutation runs, so `undefined` can't signal "clear").
+    lowStockThreshold: v.optional(v.union(v.number(), v.null())),
   },
-  handler: async (ctx, { id, ...patch }) => {
-    await ctx.db.patch(id, patch);
+  handler: async (ctx, { id, lowStockThreshold, ...patch }) => {
+    await ctx.db.patch(id, {
+      ...patch,
+      ...(lowStockThreshold !== undefined ? { lowStockThreshold: lowStockThreshold ?? undefined } : {}),
+    });
   },
 });
 
