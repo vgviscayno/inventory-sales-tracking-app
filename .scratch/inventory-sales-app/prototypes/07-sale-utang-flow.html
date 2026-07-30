@@ -1,0 +1,803 @@
+<!--
+PROTOTYPE — throwaway, do not build on top of this file.
+Resolves: .scratch/inventory-sales-app/issues/07-sale-utang-ui-prototype.md
+
+Three variants of the point-of-sale / utang checkout flow, switchable via ?variant=A|B|C
+(or the bottom bar / left-right arrow keys). Run with: open this file directly in a browser,
+or `python3 -m http.server` from this directory and visit /07-sale-utang-flow.html.
+
+No backend, no persistence — state is an in-memory JS object seeded with fake products/customers.
+Data model mirrors ticket 03 (Product/Customer/Sale/SaleItem/Payment) and ticket 05 (Payment,
+computed balance, overpayment allowed) closely enough to react to, not to ship.
+
+Each variant answers the ticket's open question — "is recording a payment part of checkout,
+or a separate screen?" — differently:
+  A — Register:        separate. Payment recording lives under a "Customers" tab, never in checkout.
+  B — Wizard:           folded in. Payment step offers an optional "also pay down old balance" box.
+  C — Customer-first:   separate, and customer identity is chosen *before* products, not after.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE — Sale / Utang flow</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #1c1917;
+    --sub: #78716c;
+    --line: #e7e5e4;
+    --bg: #fafaf9;
+    --card: #ffffff;
+    --accent: #16a34a;
+    --accent-ink: #ffffff;
+    --utang: #b45309;
+    --utang-bg: #fef3c7;
+    --danger: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding-bottom: 84px; max-width: 480px; margin: 0 auto; min-height: 100vh; }
+  h1, h2, h3 { margin: 0; }
+  button { font: inherit; }
+  .screen { padding: 12px 14px 24px; }
+  .hidden { display: none !important; }
+
+  /* ---- shared bits ---- */
+  .topbar { position: sticky; top: 0; background: var(--bg); z-index: 5; padding: 12px 14px 8px;
+    display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+  .topbar h1 { font-size: 15px; letter-spacing: .02em; text-transform: uppercase; color: var(--sub); }
+  .back-btn { border: none; background: none; font-size: 20px; padding: 4px 6px; cursor: pointer; color: var(--ink); }
+  .search { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; background: var(--card); margin: 10px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .muted { color: var(--sub); font-size: 13px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.cash { background: #dcfce7; color: #166534; }
+  .pill.utang { background: var(--utang-bg); color: var(--utang); }
+  .stepper { display: flex; align-items: center; gap: 8px; }
+  .stepper button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); font-size: 16px; cursor: pointer; }
+  .stepper span { min-width: 18px; text-align: center; font-weight: 600; }
+  .primary-btn { width: 100%; padding: 14px; border: none; border-radius: 12px; background: var(--accent);
+    color: var(--accent-ink); font-size: 16px; font-weight: 700; cursor: pointer; }
+  .primary-btn:disabled { background: #d6d3d1; cursor: not-allowed; }
+  .ghost-btn { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--card); font-size: 15px; font-weight: 600; cursor: pointer; color: var(--ink); }
+  .text-btn { border: none; background: none; color: var(--accent); font-weight: 600; cursor: pointer; padding: 4px 0; }
+  .field { display: block; margin: 10px 0; }
+  .field label { display: block; font-size: 13px; color: var(--sub); margin-bottom: 4px; }
+  .field input, .field textarea { width: 100%; padding: 10px; border: 1px solid var(--line);
+    border-radius: 10px; font-size: 15px; font-family: inherit; }
+  .toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); background: var(--ink);
+    color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 30; max-width: 90%; text-align: center; }
+  .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-radius: 16px 16px 0 0;
+    padding: 16px 14px 76px; z-index: 21; max-width: 480px; margin: 0 auto; max-height: 80vh; overflow-y: auto; }
+  .sheet-handle { width: 36px; height: 4px; background: var(--line); border-radius: 2px; margin: 0 auto 12px; }
+
+  /* ---- switcher bar (prototype-only chrome) ---- */
+  #proto-switcher { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: #111827; color: #fff; border-radius: 999px; padding: 8px 6px; display: flex; align-items: center;
+    gap: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.35); z-index: 50; font-size: 13px; }
+  #proto-switcher button { border: none; background: rgba(255,255,255,.12); color: #fff; width: 28px; height: 28px;
+    border-radius: 50%; cursor: pointer; font-size: 14px; }
+  #proto-switcher .label { padding: 0 10px; font-weight: 600; white-space: nowrap; max-width: 62vw;
+    overflow: hidden; text-overflow: ellipsis; }
+  #proto-switcher .tag { opacity: .6; font-weight: 400; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="proto-switcher"></div>
+
+<script>
+/* ---------------------------------------------------------------
+ * In-memory data model — mirrors tickets 03 & 05, not persisted.
+ * ------------------------------------------------------------- */
+const PESO = n => '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+const store = {
+  products: [
+    { id: 'p1', name: 'Coke 1.5L', sellingPrice: 65, quantityOnHand: 18 },
+    { id: 'p2', name: 'Lucky Me Pancit Canton', sellingPrice: 15, quantityOnHand: 40 },
+    { id: 'p3', name: 'Rice 1kg', sellingPrice: 55, quantityOnHand: 3 },
+    { id: 'p4', name: 'Eggs (tray)', sellingPrice: 210, quantityOnHand: 6 },
+    { id: 'p5', name: 'Pandesal (10pc)', sellingPrice: 45, quantityOnHand: 22 },
+    { id: 'p6', name: 'Shampoo sachet', sellingPrice: 8, quantityOnHand: 60 },
+    { id: 'p7', name: 'Cooking oil 1L', sellingPrice: 90, quantityOnHand: 2 },
+    { id: 'p8', name: 'Candy (each)', sellingPrice: 5, quantityOnHand: 100 },
+  ],
+  customers: [
+    { id: 'c1', name: 'Nena', notes: 'kanto store regular' },
+    { id: 'c2', name: 'Tita Rosa', notes: '' },
+  ],
+  sales: [ // seed history so balances aren't zero
+    { id: 's0', customerId: 'c1', paymentMethod: 'utang', createdAt: Date.now() - 86400000 * 3, items: [{ productId: 'p3', quantity: 2, unitPriceAtSale: 55 }] },
+    { id: 's1', customerId: 'c1', paymentMethod: 'utang', createdAt: Date.now() - 86400000, items: [{ productId: 'p1', quantity: 1, unitPriceAtSale: 65 }] },
+  ],
+  payments: [
+    { id: 'pay0', customerId: 'c1', amount: 50, paidAt: Date.now() - 86400000 * 2, notes: '' },
+  ],
+  cart: [], // {productId, quantity}
+};
+
+function saleTotal(sale) {
+  return sale.items.reduce((sum, it) => sum + it.quantity * it.unitPriceAtSale, 0);
+}
+function customerBalance(customerId) {
+  const owed = store.sales.filter(s => s.customerId === customerId && s.paymentMethod === 'utang')
+    .reduce((sum, s) => sum + saleTotal(s), 0);
+  const paid = store.payments.filter(p => p.customerId === customerId).reduce((sum, p) => sum + p.amount, 0);
+  return owed - paid;
+}
+function cartTotal() {
+  return store.cart.reduce((sum, line) => {
+    const p = store.products.find(pr => pr.id === line.productId);
+    return sum + p.sellingPrice * line.quantity;
+  }, 0);
+}
+function addToCart(productId) {
+  const line = store.cart.find(l => l.productId === productId);
+  if (line) line.quantity += 1; else store.cart.push({ productId, quantity: 1 });
+  render();
+}
+function setQty(productId, qty) {
+  if (qty <= 0) { store.cart = store.cart.filter(l => l.productId !== productId); }
+  else { const line = store.cart.find(l => l.productId === productId); if (line) line.quantity = qty; }
+  render();
+}
+function completeSale(customerId, paymentMethod) {
+  const sale = { id: 's' + (store.sales.length + Math.random()), customerId: customerId || null,
+    paymentMethod, createdAt: Date.now(), items: store.cart.map(l => {
+      const p = store.products.find(pr => pr.id === l.productId);
+      p.quantityOnHand -= l.quantity; // deduct immediately, regardless of payment status
+      return { productId: l.productId, quantity: l.quantity, unitPriceAtSale: p.sellingPrice };
+    }) };
+  store.sales.push(sale);
+  const total = saleTotal(sale);
+  store.cart = [];
+  return { sale, total };
+}
+function recordPayment(customerId, amount, notes) {
+  store.payments.push({ id: 'pay' + Math.random(), customerId, amount, paidAt: Date.now(), notes: notes || '' });
+}
+function addCustomer(name) {
+  const c = { id: 'c' + Math.random(), name, notes: '' };
+  store.customers.push(c);
+  return c;
+}
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+/* ---------------------------------------------------------------
+ * Variant-local UI state (each variant owns its own "screen" state
+ * so switching variants doesn't leak navigation position between them)
+ * ------------------------------------------------------------- */
+const ui = {
+  A: { screen: 'register', cartOpen: false, paymentMethod: 'cash', customerId: null, newCustomerMode: false,
+       customersScreen: null /* customerId being viewed */, payAmount: '' },
+  B: { step: 1, paymentMethod: null, customerId: null, newCustomerMode: false, payOldBalance: false, payAmount: '' },
+  C: { screen: 'home', customerId: null, newCustomerMode: false, saleCustomerId: null, saleIsCash: false, payAmount: '' },
+};
+
+/* ================================================================
+ * VARIANT A — "Register": product grid + sticky cart, payment
+ * recording lives only under a separate Customers tab.
+ * ============================================================== */
+function renderA() {
+  const s = ui.A;
+  const root = document.createElement('div');
+
+  const tabs = document.createElement('div');
+  tabs.className = 'row';
+  tabs.style.cssText = 'padding:10px 14px 0;gap:8px;';
+  ['register', 'customers'].forEach(tabName => {
+    const b = document.createElement('button');
+    b.className = s.screen === tabName || (tabName === 'customers' && s.screen.startsWith('customer')) ? 'primary-btn' : 'ghost-btn';
+    b.style.cssText = 'flex:1;padding:10px;font-size:13px;';
+    b.textContent = tabName === 'register' ? 'Register' : 'Customers';
+    b.onclick = () => { s.screen = tabName === 'register' ? 'register' : 'customersList'; render(); };
+    tabs.appendChild(b);
+  });
+  root.appendChild(tabs);
+
+  if (s.screen === 'register') root.appendChild(renderA_register());
+  else if (s.screen === 'customersList') root.appendChild(renderA_customersList());
+  else if (s.screen === 'customerProfile') root.appendChild(renderA_customerProfile());
+
+  return root;
+}
+
+function renderA_register() {
+  const s = ui.A;
+  const wrap = document.createElement('div');
+  wrap.className = 'screen';
+
+  const search = document.createElement('input');
+  search.className = 'search'; search.placeholder = 'Search products…';
+  wrap.appendChild(search);
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
+  store.products.forEach(p => {
+    const line = store.cart.find(l => l.productId === p.id);
+    const card = document.createElement('button');
+    card.className = 'card';
+    card.style.cssText = 'text-align:left;cursor:pointer;position:relative;' + (line ? 'border-color:var(--accent);' : '');
+    card.innerHTML = `<div style="font-weight:600;font-size:14px;">${p.name}</div>
+      <div class="muted">${PESO(p.sellingPrice)} · ${p.quantityOnHand} left</div>`;
+    if (line) {
+      const badge = document.createElement('div');
+      badge.style.cssText = 'position:absolute;top:8px;right:8px;background:var(--accent);color:#fff;border-radius:999px;min-width:20px;height:20px;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:700;';
+      badge.textContent = line.quantity;
+      card.appendChild(badge);
+    }
+    card.onclick = () => addToCart(p.id);
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+
+  // sticky cart bar
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;left:0;right:0;bottom:70px;max-width:480px;margin:0 auto;padding:0 14px;';
+  const barInner = document.createElement('div');
+  barInner.className = 'card row';
+  barInner.style.cssText = 'box-shadow:0 4px 16px rgba(0,0,0,.12);cursor:pointer;';
+  barInner.innerHTML = `<div><strong>${store.cart.reduce((n,l)=>n+l.quantity,0)} item(s)</strong> <span class="muted">${PESO(cartTotal())}</span></div><div>▲ Checkout</div>`;
+  barInner.onclick = () => { s.cartOpen = true; render(); };
+  bar.appendChild(barInner);
+  if (store.cart.length) wrap.appendChild(bar);
+
+  if (s.cartOpen) wrap.appendChild(renderA_cartSheet());
+
+  return wrap;
+}
+
+function renderA_cartSheet() {
+  const s = ui.A;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sheet-backdrop';
+  backdrop.onclick = () => { s.cartOpen = false; render(); };
+
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.onclick = e => e.stopPropagation();
+  const handle = document.createElement('div'); handle.className = 'sheet-handle'; sheet.appendChild(handle);
+
+  const h = document.createElement('h3'); h.textContent = 'Checkout'; h.style.marginBottom = '10px';
+  sheet.appendChild(h);
+
+  store.cart.forEach(l => {
+    const p = store.products.find(pr => pr.id === l.productId);
+    const row = document.createElement('div');
+    row.className = 'row'; row.style.marginBottom = '8px';
+    row.innerHTML = `<div>${p.name}<div class="muted">${PESO(p.sellingPrice)} each</div></div>`;
+    const stepper = document.createElement('div'); stepper.className = 'stepper';
+    stepper.innerHTML = `<button data-d="-1">−</button><span>${l.quantity}</span><button data-d="1">+</button>`;
+    stepper.querySelectorAll('button').forEach(b => b.onclick = () => setQty(l.productId, l.quantity + Number(b.dataset.d)));
+    row.appendChild(stepper);
+    sheet.appendChild(row);
+  });
+
+  const totalRow = document.createElement('div');
+  totalRow.className = 'row'; totalRow.style.cssText = 'margin:12px 0;font-size:17px;font-weight:700;border-top:1px solid var(--line);padding-top:10px;';
+  totalRow.innerHTML = `<span>Total</span><span>${PESO(cartTotal())}</span>`;
+  sheet.appendChild(totalRow);
+
+  const methodRow = document.createElement('div');
+  methodRow.className = 'row'; methodRow.style.gap = '8px';
+  ['cash', 'utang'].forEach(m => {
+    const b = document.createElement('button');
+    b.className = s.paymentMethod === m ? 'primary-btn' : 'ghost-btn';
+    b.style.flex = '1';
+    b.textContent = m === 'cash' ? 'Cash' : 'Utang';
+    b.onclick = () => { s.paymentMethod = m; render(); };
+    methodRow.appendChild(b);
+  });
+  sheet.appendChild(methodRow);
+
+  if (s.paymentMethod === 'utang') {
+    sheet.appendChild(renderCustomerPicker(s, (id) => { s.customerId = id; render(); }));
+  }
+
+  const confirm = document.createElement('button');
+  confirm.className = 'primary-btn'; confirm.style.marginTop = '14px'; confirm.textContent = 'Complete Sale';
+  confirm.disabled = store.cart.length === 0 || (s.paymentMethod === 'utang' && !s.customerId);
+  confirm.onclick = () => {
+    const { total } = completeSale(s.customerId, s.paymentMethod);
+    const msg = s.paymentMethod === 'utang'
+      ? `Sale recorded (${PESO(total)}). ${store.customers.find(c=>c.id===s.customerId).name}'s balance: ${PESO(customerBalance(s.customerId))}`
+      : `Sale recorded (${PESO(total)}), paid cash.`;
+    s.cartOpen = false; s.customerId = null; s.paymentMethod = 'cash';
+    render(); showToast(msg);
+  };
+  sheet.appendChild(confirm);
+
+  const frag = document.createElement('div');
+  frag.appendChild(backdrop); frag.appendChild(sheet);
+  return frag;
+}
+
+function renderCustomerPicker(s, onPick) {
+  const wrap = document.createElement('div'); wrap.style.marginTop = '10px';
+  if (!s.newCustomerMode) {
+    const label = document.createElement('div'); label.className = 'field';
+    label.innerHTML = '<label>Customer</label>';
+    const sel = document.createElement('select');
+    sel.style.cssText = 'width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:15px;';
+    sel.innerHTML = '<option value="">Select…</option>' + store.customers.map(c =>
+      `<option value="${c.id}" ${s.customerId===c.id?'selected':''}>${c.name} (owes ${PESO(customerBalance(c.id))})</option>`).join('');
+    sel.onchange = () => onPick(sel.value || null);
+    label.appendChild(sel);
+    wrap.appendChild(label);
+    const addBtn = document.createElement('button');
+    addBtn.className = 'text-btn'; addBtn.textContent = '+ New customer';
+    addBtn.onclick = () => { s.newCustomerMode = true; render(); };
+    wrap.appendChild(addBtn);
+  } else {
+    const field = document.createElement('div'); field.className = 'field';
+    field.innerHTML = '<label>New customer name</label><input placeholder="e.g. Manang Baby" />';
+    const input = field.querySelector('input');
+    wrap.appendChild(field);
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'text-btn'; saveBtn.textContent = 'Save & select';
+    saveBtn.onclick = () => { if (!input.value.trim()) return; const c = addCustomer(input.value.trim()); s.newCustomerMode = false; onPick(c.id); };
+    wrap.appendChild(saveBtn);
+  }
+  return wrap;
+}
+
+function renderA_customersList() {
+  const wrap = document.createElement('div'); wrap.className = 'screen';
+  const h = document.createElement('h2'); h.textContent = 'Customers'; h.style.margin = '4px 0 12px'; wrap.appendChild(h);
+  store.customers.forEach(c => {
+    const bal = customerBalance(c.id);
+    const row = document.createElement('button');
+    row.className = 'card row'; row.style.cssText = 'width:100%;text-align:left;margin-bottom:8px;cursor:pointer;';
+    row.innerHTML = `<div><strong>${c.name}</strong>${c.notes ? `<div class="muted">${c.notes}</div>` : ''}</div>
+      <div class="${bal>0?'pill utang':'muted'}">${bal>0?PESO(bal)+' owed':'settled'}</div>`;
+    row.onclick = () => { ui.A.screen = 'customerProfile'; ui.A.customersScreen = c.id; ui.A.payAmount=''; render(); };
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+function renderA_customerProfile() {
+  const s = ui.A;
+  const c = store.customers.find(cu => cu.id === s.customersScreen);
+  const wrap = document.createElement('div'); wrap.className = 'screen';
+  const back = document.createElement('button'); back.className = 'back-btn'; back.textContent = '← Customers';
+  back.style.cssText = 'padding:0;margin-bottom:10px;'; back.onclick = () => { s.screen = 'customersList'; render(); };
+  wrap.appendChild(back);
+
+  const bal = customerBalance(c.id);
+  const head = document.createElement('div'); head.className = 'card'; head.style.marginBottom = '14px';
+  head.innerHTML = `<h2>${c.name}</h2><div class="muted" style="margin:4px 0;">${c.notes||''}</div>
+    <div style="font-size:22px;font-weight:700;margin-top:8px;color:${bal>0?'var(--utang)':'var(--ink)'}">${PESO(bal)}</div>
+    <div class="muted">current balance</div>`;
+  wrap.appendChild(head);
+
+  const payLabel = document.createElement('h3'); payLabel.textContent = 'Record a payment'; payLabel.style.cssText='font-size:14px;margin-bottom:8px;';
+  wrap.appendChild(payLabel);
+  const field = document.createElement('div'); field.className = 'field';
+  field.innerHTML = `<label>Amount received</label><input type="number" placeholder="0" value="${s.payAmount}" />`;
+  const input = field.querySelector('input');
+  input.oninput = () => { s.payAmount = input.value; };
+  wrap.appendChild(field);
+  const payBtn = document.createElement('button'); payBtn.className = 'primary-btn'; payBtn.textContent = 'Record Payment';
+  payBtn.onclick = () => {
+    const amt = Number(s.payAmount);
+    if (!amt) return;
+    recordPayment(c.id, amt, '');
+    s.payAmount = '';
+    render(); showToast(`Payment recorded. ${c.name}'s new balance: ${PESO(customerBalance(c.id))}`);
+  };
+  wrap.appendChild(payBtn);
+
+  const histH = document.createElement('h3'); histH.textContent = 'History'; histH.style.cssText = 'font-size:14px;margin:18px 0 8px;';
+  wrap.appendChild(histH);
+  const events = [
+    ...store.sales.filter(s2 => s2.customerId === c.id && s2.paymentMethod === 'utang').map(s2 => ({ t: s2.createdAt, label: `Utang sale`, amt: saleTotal(s2), sign: 1 })),
+    ...store.payments.filter(p => p.customerId === c.id).map(p => ({ t: p.paidAt, label: 'Payment', amt: p.amount, sign: -1 })),
+  ].sort((a,b) => b.t - a.t);
+  events.forEach(e => {
+    const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'padding:6px 0;border-bottom:1px solid var(--line);';
+    row.innerHTML = `<span class="muted">${new Date(e.t).toLocaleDateString()} — ${e.label}</span><span style="color:${e.sign>0?'var(--utang)':'var(--accent)'}">${e.sign>0?'+':'−'}${PESO(e.amt)}</span>`;
+    wrap.appendChild(row);
+  });
+
+  return wrap;
+}
+
+/* ================================================================
+ * VARIANT B — "Wizard": step-by-step, payment-recording folded
+ * into checkout as an optional box when an utang customer is picked.
+ * ============================================================== */
+function renderB() {
+  const s = ui.B;
+  const root = document.createElement('div'); root.className = 'screen';
+
+  const steps = document.createElement('div');
+  steps.className = 'row'; steps.style.cssText = 'margin-bottom:14px;';
+  ['1 Items', '2 Payment', '3 Confirm'].forEach((label, i) => {
+    const n = i + 1;
+    const dot = document.createElement('div');
+    dot.style.cssText = `flex:1;text-align:center;padding:8px 0;border-bottom:3px solid ${s.step===n?'var(--accent)':'var(--line)'};font-size:12px;font-weight:${s.step===n?'700':'400'};color:${s.step>=n?'var(--ink)':'var(--sub)'};`;
+    dot.textContent = label;
+    steps.appendChild(dot);
+  });
+  root.appendChild(steps);
+
+  if (s.step === 1) root.appendChild(renderB_step1());
+  if (s.step === 2) root.appendChild(renderB_step2());
+  if (s.step === 3) root.appendChild(renderB_step3());
+
+  return root;
+}
+
+function renderB_step1() {
+  const wrap = document.createElement('div');
+  const search = document.createElement('input'); search.className = 'search'; search.placeholder = 'Search products…';
+  wrap.appendChild(search);
+  store.products.forEach(p => {
+    const line = store.cart.find(l => l.productId === p.id);
+    const row = document.createElement('div'); row.className = 'card row'; row.style.marginBottom = '8px';
+    row.innerHTML = `<div><strong>${p.name}</strong><div class="muted">${PESO(p.sellingPrice)} · ${p.quantityOnHand} left</div></div>`;
+    const stepper = document.createElement('div'); stepper.className = 'stepper';
+    if (line) {
+      stepper.innerHTML = `<button data-d="-1">−</button><span>${line.quantity}</span><button data-d="1">+</button>`;
+      stepper.querySelectorAll('button').forEach(b => b.onclick = () => setQty(p.id, line.quantity + Number(b.dataset.d)));
+    } else {
+      const addBtn = document.createElement('button'); addBtn.className = 'ghost-btn'; addBtn.style.cssText='width:auto;white-space:nowrap;padding:6px 14px;flex-shrink:0;'; addBtn.textContent = 'Add';
+      addBtn.onclick = () => addToCart(p.id);
+      stepper.appendChild(addBtn);
+    }
+    row.appendChild(stepper);
+    wrap.appendChild(row);
+  });
+
+  const bar = document.createElement('div'); bar.style.cssText = 'position:fixed;left:0;right:0;bottom:70px;max-width:480px;margin:0 auto;padding:0 14px;';
+  const inner = document.createElement('div'); inner.className = 'row'; inner.style.cssText = 'background:var(--card);border-radius:12px;padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,.12);';
+  inner.innerHTML = `<strong>${PESO(cartTotal())}</strong>`;
+  const next = document.createElement('button'); next.className = 'primary-btn'; next.style.cssText = 'width:auto;padding:10px 20px;';
+  next.textContent = 'Next →'; next.disabled = store.cart.length === 0;
+  next.onclick = () => { ui.B.step = 2; render(); };
+  inner.appendChild(next);
+  bar.appendChild(inner);
+  wrap.appendChild(bar);
+  return wrap;
+}
+
+function renderB_step2() {
+  const s = ui.B;
+  const wrap = document.createElement('div');
+  const methodRow = document.createElement('div'); methodRow.style.cssText = 'display:flex;gap:10px;margin-bottom:14px;';
+  ['cash', 'utang'].forEach(m => {
+    const b = document.createElement('button');
+    b.className = s.paymentMethod === m ? 'primary-btn' : 'ghost-btn';
+    b.style.cssText = 'flex:1;padding:20px 0;font-size:16px;';
+    b.textContent = m === 'cash' ? '💵 Cash' : '📒 Utang';
+    b.onclick = () => { s.paymentMethod = m; render(); };
+    methodRow.appendChild(b);
+  });
+  wrap.appendChild(methodRow);
+
+  if (s.paymentMethod === 'utang') {
+    wrap.appendChild(renderCustomerPicker(s, (id) => { s.customerId = id; s.payOldBalance=false; s.payAmount=''; render(); }));
+    if (s.customerId) {
+      const bal = customerBalance(s.customerId);
+      const c = store.customers.find(cu => cu.id === s.customerId);
+      const info = document.createElement('div'); info.className = 'card'; info.style.cssText='margin-top:12px;background:var(--utang-bg);border-color:var(--utang-bg);';
+      info.innerHTML = `<div class="muted">Current balance for ${c.name}</div><div style="font-size:18px;font-weight:700;color:var(--utang);">${PESO(bal)}</div>`;
+      wrap.appendChild(info);
+
+      if (bal > 0) {
+        const toggle = document.createElement('label'); toggle.className = 'row'; toggle.style.cssText = 'margin-top:10px;cursor:pointer;';
+        toggle.innerHTML = `<span>Also collect payment toward old balance now?</span>`;
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = s.payOldBalance;
+        cb.onchange = () => { s.payOldBalance = cb.checked; render(); };
+        toggle.prepend(cb);
+        wrap.appendChild(toggle);
+        if (s.payOldBalance) {
+          const field = document.createElement('div'); field.className = 'field';
+          field.innerHTML = `<label>Amount collected</label><input type="number" placeholder="0" value="${s.payAmount}" />`;
+          field.querySelector('input').oninput = e => { s.payAmount = e.target.value; };
+          wrap.appendChild(field);
+        }
+      }
+    }
+  }
+
+  const nextBtn = document.createElement('button'); nextBtn.className = 'primary-btn'; nextBtn.style.marginTop = '16px';
+  nextBtn.textContent = 'Next →';
+  nextBtn.disabled = !s.paymentMethod || (s.paymentMethod === 'utang' && !s.customerId);
+  nextBtn.onclick = () => { s.step = 3; render(); };
+  wrap.appendChild(nextBtn);
+
+  const backBtn = document.createElement('button'); backBtn.className = 'text-btn'; backBtn.textContent = '← Back';
+  backBtn.style.marginTop = '10px'; backBtn.onclick = () => { s.step = 1; render(); };
+  wrap.appendChild(backBtn);
+  return wrap;
+}
+
+function renderB_step3() {
+  const s = ui.B;
+  const wrap = document.createElement('div');
+  const summary = document.createElement('div'); summary.className = 'card';
+  let rows = store.cart.map(l => { const p = store.products.find(pr=>pr.id===l.productId); return `<div class="row" style="padding:4px 0;"><span>${l.quantity}× ${p.name}</span><span>${PESO(p.sellingPrice*l.quantity)}</span></div>`; }).join('');
+  summary.innerHTML = rows + `<div class="row" style="padding-top:8px;margin-top:6px;border-top:1px solid var(--line);font-weight:700;"><span>Total</span><span>${PESO(cartTotal())}</span></div>
+    <div class="row" style="margin-top:10px;"><span>Payment</span><span class="pill ${s.paymentMethod}">${s.paymentMethod}</span></div>`;
+  if (s.paymentMethod === 'utang') {
+    const c = store.customers.find(cu => cu.id === s.customerId);
+    const rowExtra = document.createElement('div'); rowExtra.className = 'row'; rowExtra.style.marginTop='6px';
+    rowExtra.innerHTML = `<span>Customer</span><span>${c.name}</span>`;
+    summary.appendChild(rowExtra);
+    if (s.payOldBalance && Number(s.payAmount) > 0) {
+      const r2 = document.createElement('div'); r2.className = 'row'; r2.style.marginTop = '6px';
+      r2.innerHTML = `<span>Also collecting</span><span>${PESO(Number(s.payAmount))}</span>`;
+      summary.appendChild(r2);
+    }
+  }
+  wrap.appendChild(summary);
+
+  const confirm = document.createElement('button'); confirm.className = 'primary-btn'; confirm.style.marginTop = '16px';
+  confirm.textContent = 'Confirm Sale';
+  confirm.onclick = () => {
+    const { total } = completeSale(s.customerId, s.paymentMethod);
+    if (s.paymentMethod === 'utang' && s.payOldBalance && Number(s.payAmount) > 0) {
+      recordPayment(s.customerId, Number(s.payAmount), '');
+    }
+    let msg = `Sale recorded (${PESO(total)}).`;
+    if (s.paymentMethod === 'utang') {
+      const c = store.customers.find(cu => cu.id === s.customerId);
+      msg += ` ${c.name}'s balance: ${PESO(customerBalance(c.id))}`;
+    }
+    Object.assign(s, { step: 1, paymentMethod: null, customerId: null, newCustomerMode: false, payOldBalance: false, payAmount: '' });
+    render(); showToast(msg);
+  };
+  wrap.appendChild(confirm);
+
+  const backBtn = document.createElement('button'); backBtn.className = 'text-btn'; backBtn.textContent = '← Back';
+  backBtn.style.marginTop = '10px'; backBtn.onclick = () => { s.step = 2; render(); };
+  wrap.appendChild(backBtn);
+  return wrap;
+}
+
+/* ================================================================
+ * VARIANT C — "Customer-first": choose who the sale is for before
+ * touching products. Payment recording is a standalone profile
+ * action, entirely outside the sale flow.
+ * ============================================================== */
+function renderC() {
+  const s = ui.C;
+  const root = document.createElement('div');
+  if (s.screen === 'home') root.appendChild(renderC_home());
+  else if (s.screen === 'customerProfile') root.appendChild(renderC_profile());
+  else if (s.screen === 'saleItems') root.appendChild(renderC_saleItems());
+  else if (s.screen === 'saleConfirm') root.appendChild(renderC_saleConfirm());
+  return root;
+}
+
+function renderC_home() {
+  const s = ui.C;
+  const wrap = document.createElement('div'); wrap.className = 'screen';
+  const h = document.createElement('h2'); h.textContent = 'New sale — who is this for?'; h.style.cssText = 'font-size:17px;margin-bottom:12px;';
+  wrap.appendChild(h);
+
+  const cashBtn = document.createElement('button'); cashBtn.className = 'ghost-btn'; cashBtn.style.cssText = 'margin-bottom:14px;padding:16px;';
+  cashBtn.textContent = '💵 Walk-in (cash sale)';
+  cashBtn.onclick = () => { s.saleCustomerId = null; s.saleIsCash = true; s.screen = 'saleItems'; render(); };
+  wrap.appendChild(cashBtn);
+
+  const search = document.createElement('input'); search.className = 'search'; search.placeholder = 'Search customers…';
+  wrap.appendChild(search);
+
+  store.customers.forEach(c => {
+    const bal = customerBalance(c.id);
+    const row = document.createElement('div'); row.className = 'card row'; row.style.cssText = 'margin-bottom:8px;cursor:pointer;';
+    row.innerHTML = `<div><strong>${c.name}</strong><div class="muted">${bal>0?PESO(bal)+' owed':'settled up'}</div></div><div>›</div>`;
+    row.onclick = () => { s.customerId = c.id; s.screen = 'customerProfile'; render(); };
+    wrap.appendChild(row);
+  });
+
+  const addBtn = document.createElement('button'); addBtn.className = 'text-btn'; addBtn.textContent = '+ New customer';
+  addBtn.onclick = () => { const name = window.prompt('Customer name?'); if (name && name.trim()) { const c = addCustomer(name.trim()); s.customerId = c.id; s.screen = 'customerProfile'; render(); } };
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
+function renderC_profile() {
+  const s = ui.C;
+  const c = store.customers.find(cu => cu.id === s.customerId);
+  const bal = customerBalance(c.id);
+  const wrap = document.createElement('div'); wrap.className = 'screen';
+  const back = document.createElement('button'); back.className = 'back-btn'; back.textContent = '← Back'; back.style.cssText='padding:0;margin-bottom:10px;';
+  back.onclick = () => { s.screen = 'home'; render(); };
+  wrap.appendChild(back);
+
+  const head = document.createElement('div'); head.className = 'card'; head.style.marginBottom = '14px';
+  head.innerHTML = `<h2>${c.name}</h2><div style="font-size:22px;font-weight:700;margin-top:8px;color:${bal>0?'var(--utang)':'var(--ink)'}">${PESO(bal)}</div><div class="muted">current balance</div>`;
+  wrap.appendChild(head);
+
+  const saleBtn = document.createElement('button'); saleBtn.className = 'primary-btn'; saleBtn.style.marginBottom = '10px';
+  saleBtn.textContent = `New Sale for ${c.name}`;
+  saleBtn.onclick = () => { s.saleCustomerId = c.id; s.saleIsCash = false; s.screen = 'saleItems'; render(); };
+  wrap.appendChild(saleBtn);
+
+  const payBtn = document.createElement('button'); payBtn.className = 'ghost-btn';
+  payBtn.textContent = 'Record Payment';
+  payBtn.onclick = () => { s.screen = 'recordPayment'; render(); };
+  wrap.appendChild(payBtn);
+
+  if (s.screen === 'recordPayment') {
+    // rendered inline via a lightweight sheet-less block for simplicity
+  }
+  return wrap;
+}
+
+// separate payment-recording screen, deliberately outside the sale flow entirely
+function renderC_recordPayment() {
+  const s = ui.C;
+  const c = store.customers.find(cu => cu.id === s.customerId);
+  const wrap = document.createElement('div'); wrap.className = 'screen';
+  const back = document.createElement('button'); back.className = 'back-btn'; back.textContent = '← ' + c.name; back.style.cssText='padding:0;margin-bottom:10px;';
+  back.onclick = () => { s.screen = 'customerProfile'; render(); };
+  wrap.appendChild(back);
+  const h = document.createElement('h2'); h.textContent = 'Record Payment'; h.style.marginBottom = '10px';
+  wrap.appendChild(h);
+  const field = document.createElement('div'); field.className = 'field';
+  field.innerHTML = `<label>Amount received from ${c.name}</label><input type="number" placeholder="0" value="${s.payAmount}" />`;
+  field.querySelector('input').oninput = e => { s.payAmount = e.target.value; };
+  wrap.appendChild(field);
+  const saveBtn = document.createElement('button'); saveBtn.className = 'primary-btn'; saveBtn.textContent = 'Save Payment';
+  saveBtn.onclick = () => {
+    const amt = Number(s.payAmount); if (!amt) return;
+    recordPayment(c.id, amt, ''); s.payAmount = ''; s.screen = 'customerProfile';
+    render(); showToast(`Payment recorded. ${c.name}'s new balance: ${PESO(customerBalance(c.id))}`);
+  };
+  wrap.appendChild(saveBtn);
+  return wrap;
+}
+
+function renderC_saleItems() {
+  const s = ui.C;
+  const wrap = document.createElement('div'); wrap.className = 'screen';
+  const label = s.saleIsCash ? 'Walk-in sale' : `Sale for ${store.customers.find(c=>c.id===s.saleCustomerId).name}`;
+  const back = document.createElement('button'); back.className = 'back-btn'; back.textContent = '← ' + label; back.style.cssText='padding:0;margin-bottom:10px;font-size:14px;';
+  back.onclick = () => { store.cart = []; s.screen = s.saleIsCash ? 'home' : 'customerProfile'; render(); };
+  wrap.appendChild(back);
+
+  store.products.forEach(p => {
+    const line = store.cart.find(l => l.productId === p.id);
+    const row = document.createElement('div'); row.className = 'card row'; row.style.marginBottom = '8px';
+    row.innerHTML = `<div><strong>${p.name}</strong><div class="muted">${PESO(p.sellingPrice)}</div></div>`;
+    const stepper = document.createElement('div'); stepper.className = 'stepper';
+    if (line) {
+      stepper.innerHTML = `<button data-d="-1">−</button><span>${line.quantity}</span><button data-d="1">+</button>`;
+      stepper.querySelectorAll('button').forEach(b => b.onclick = () => setQty(p.id, line.quantity + Number(b.dataset.d)));
+    } else {
+      const addBtn = document.createElement('button'); addBtn.className = 'ghost-btn'; addBtn.style.cssText='width:auto;white-space:nowrap;padding:6px 14px;flex-shrink:0;'; addBtn.textContent = 'Add';
+      addBtn.onclick = () => addToCart(p.id);
+      stepper.appendChild(addBtn);
+    }
+    row.appendChild(stepper);
+    wrap.appendChild(row);
+  });
+
+  const bar = document.createElement('div'); bar.style.cssText = 'position:fixed;left:0;right:0;bottom:70px;max-width:480px;margin:0 auto;padding:0 14px;';
+  const inner = document.createElement('div'); inner.className = 'row'; inner.style.cssText = 'background:var(--card);border-radius:12px;padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,.12);';
+  inner.innerHTML = `<strong>${PESO(cartTotal())}</strong>`;
+  const next = document.createElement('button'); next.className = 'primary-btn'; next.style.cssText = 'width:auto;padding:10px 20px;';
+  next.textContent = 'Review →'; next.disabled = store.cart.length === 0;
+  next.onclick = () => { s.screen = 'saleConfirm'; render(); };
+  inner.appendChild(next);
+  bar.appendChild(inner);
+  wrap.appendChild(bar);
+  return wrap;
+}
+
+function renderC_saleConfirm() {
+  const s = ui.C;
+  const wrap = document.createElement('div'); wrap.className = 'screen';
+  const back = document.createElement('button'); back.className = 'back-btn'; back.textContent = '← Back'; back.style.cssText='padding:0;margin-bottom:10px;font-size:14px;';
+  back.onclick = () => { s.screen = 'saleItems'; render(); };
+  wrap.appendChild(back);
+  const summary = document.createElement('div'); summary.className = 'card';
+  let rows = store.cart.map(l => { const p = store.products.find(pr=>pr.id===l.productId); return `<div class="row" style="padding:4px 0;"><span>${l.quantity}× ${p.name}</span><span>${PESO(p.sellingPrice*l.quantity)}</span></div>`; }).join('');
+  summary.innerHTML = rows + `<div class="row" style="padding-top:8px;margin-top:6px;border-top:1px solid var(--line);font-weight:700;"><span>Total</span><span>${PESO(cartTotal())}</span></div>`;
+  wrap.appendChild(summary);
+
+  // cash toggle still available even for a known customer (e.g. she pays cash this time)
+  const methodRow = document.createElement('div'); methodRow.className = 'row'; methodRow.style.cssText = 'gap:8px;margin:14px 0;';
+  const isUtang = !s.saleIsCash;
+  ['cash', 'utang'].forEach(m => {
+    const b = document.createElement('button');
+    const active = (m === 'utang') === isUtang;
+    b.className = active ? 'primary-btn' : 'ghost-btn'; b.style.flex = '1';
+    b.textContent = m;
+    b.disabled = m === 'utang' && s.saleCustomerId === null; // no customer chosen → can't go utang
+    b.onclick = () => { s.saleIsCash = (m === 'cash'); render(); };
+    methodRow.appendChild(b);
+  });
+  wrap.appendChild(methodRow);
+
+  const confirm = document.createElement('button'); confirm.className = 'primary-btn';
+  confirm.textContent = 'Confirm Sale';
+  confirm.onclick = () => {
+    const method = s.saleIsCash ? 'cash' : 'utang';
+    const { total } = completeSale(s.saleCustomerId, method);
+    let msg = `Sale recorded (${PESO(total)}).`;
+    if (method === 'utang') msg += ` New balance: ${PESO(customerBalance(s.saleCustomerId))}`;
+    s.screen = 'home'; render(); showToast(msg);
+  };
+  wrap.appendChild(confirm);
+  return wrap;
+}
+
+/* ---------------------------------------------------------------
+ * Switcher + router
+ * ------------------------------------------------------------- */
+const VARIANTS = {
+  A: { fn: renderA, name: 'Register — checkout & payments are separate tabs' },
+  B: { fn: renderB, name: 'Wizard — payment step folds in old-balance paydown' },
+  C: { fn: renderC, name: 'Customer-first — pick who, then what; payments never in checkout' },
+};
+const order = ['A', 'B', 'C'];
+
+function currentVariant() {
+  const p = new URLSearchParams(location.search).get('variant');
+  return order.includes(p) ? p : 'A';
+}
+function setVariant(v) {
+  const url = new URL(location.href);
+  url.searchParams.set('variant', v);
+  history.replaceState(null, '', url);
+  render();
+}
+
+function render() {
+  const v = currentVariant();
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if (v === 'C' && ui.C.screen === 'recordPayment') {
+    app.appendChild(renderC_recordPayment());
+  } else {
+    app.appendChild(VARIANTS[v].fn());
+  }
+  renderSwitcher(v);
+}
+
+function renderSwitcher(v) {
+  const bar = document.getElementById('proto-switcher');
+  bar.innerHTML = '';
+  const prev = document.createElement('button'); prev.textContent = '←';
+  prev.onclick = () => setVariant(order[(order.indexOf(v) - 1 + order.length) % order.length]);
+  const label = document.createElement('div'); label.className = 'label';
+  label.innerHTML = `${v} <span class="tag">— ${VARIANTS[v].name}</span>`;
+  const next = document.createElement('button'); next.textContent = '→';
+  next.onclick = () => setVariant(order[(order.indexOf(v) + 1) % order.length]);
+  bar.appendChild(prev); bar.appendChild(label); bar.appendChild(next);
+}
+
+document.addEventListener('keydown', (e) => {
+  const tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const v = currentVariant();
+    const dir = e.key === 'ArrowLeft' ? -1 : 1;
+    setVariant(order[(order.indexOf(v) + dir + order.length) % order.length]);
+  }
+});
+
+render();
+</script>
+</body>
+</html>

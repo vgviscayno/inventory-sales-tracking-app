@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #1c1917;
+  --sub: #78716c;
+  --line: #e7e5e4;
+  --bg: #fafaf9;
+  --card: #ffffff;
+  --accent: #16a34a;
+  --accent-ink: #ffffff;
+  --utang: #b45309;
+  --utang-bg: #fef3c7;
+  --danger: #dc2626;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-sub: var(--sub);
+  --color-line: var(--line);
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-utang: var(--utang);
+  --color-utang-bg: var(--utang-bg);
+  --color-danger: var(--danger);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.pill.cash {
+  background: #dcfce7;
+  color: #166534;
+}
+.pill.utang {
+  background: var(--utang-bg);
+  color: var(--utang);
+}

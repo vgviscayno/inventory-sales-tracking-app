@@ -1,0 +1,43 @@
+# dependencies
+/app/node_modules
+/app/.pnp
+/app/.pnp.*
+/app/.yarn/*
+!/app/.yarn/patches
+!/app/.yarn/plugins
+!/app/.yarn/releases
+!/app/.yarn/versions
+
+# testing
+/app/coverage
+
+# next.js
+/app/.next/
+/app/out/
+
+# production
+/app/build
+
+# convex local dev backend
+/app/.convex/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env*.example
+
+# vercel
+/app/.vercel
+
+# typescript
+*.tsbuildinfo
+/app/next-env.d.ts
