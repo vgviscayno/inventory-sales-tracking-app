@@ -1,3 +1,7 @@
+## Git workflow
+
+`dev` is the integration branch, not `main`; PRs and fast-forward merge policy. See `docs/git-workflow.md`.
+
 ## Agent skills
 
 ### Issue tracker
