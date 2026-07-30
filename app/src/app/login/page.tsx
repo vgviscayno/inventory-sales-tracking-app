@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,7 +36,6 @@ export default function LoginPage() {
         <input
           type="password"
           inputMode="numeric"
-          autoFocus
           value={passcode}
           onChange={(e) => setPasscode(e.target.value)}
           className="w-full rounded-[10px] border border-line bg-card px-4 py-3 text-center text-lg"

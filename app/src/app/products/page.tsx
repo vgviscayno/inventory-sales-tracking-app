@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
+import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
 
 export default function ProductsPage() {
   const [search, setSearch] = useState("");
-  const products = useQuery(api.products.list, { search: search || undefined }) ?? [];
+  const products =
+    useQuery(api.products.list, { search: search || undefined }) ?? [];
   const createProduct = useMutation(api.products.create);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -18,7 +19,10 @@ export default function ProductsPage() {
   const [adding, setAdding] = useState(false);
 
   const canAdd =
-    name.trim() && Number(sellingPrice) > 0 && quantityOnHand.trim() !== "" && Number(quantityOnHand) >= 0;
+    name.trim() &&
+    Number(sellingPrice) > 0 &&
+    quantityOnHand.trim() !== "" &&
+    Number(quantityOnHand) >= 0;
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -28,7 +32,9 @@ export default function ProductsPage() {
       name: name.trim(),
       sellingPrice: Number(sellingPrice),
       quantityOnHand: Number(quantityOnHand),
-      lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : undefined,
+      lowStockThreshold: lowStockThreshold
+        ? Number(lowStockThreshold)
+        : undefined,
     });
     setName("");
     setSellingPrice("");
@@ -51,6 +57,7 @@ export default function ProductsPage() {
 
       {!formOpen ? (
         <button
+          type="button"
           onClick={() => setFormOpen(true)}
           className="w-full rounded-xl bg-accent py-2.5 font-semibold text-accent-ink"
         >
@@ -59,18 +66,29 @@ export default function ProductsPage() {
       ) : (
         <form onSubmit={handleAdd} className="card space-y-2.5 p-3">
           <div>
-            <label className="text-sub block text-[13px] mb-1">Name</label>
+            <label
+              htmlFor="product-name"
+              className="text-sub block text-[13px] mb-1"
+            >
+              Name
+            </label>
             <input
+              id="product-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
-              autoFocus
             />
           </div>
           <div className="flex gap-2">
             <div className="flex-1">
-              <label className="text-sub block text-[13px] mb-1">Selling price</label>
+              <label
+                htmlFor="product-selling-price"
+                className="text-sub block text-[13px] mb-1"
+              >
+                Selling price
+              </label>
               <input
+                id="product-selling-price"
                 type="number"
                 value={sellingPrice}
                 onChange={(e) => setSellingPrice(e.target.value)}
@@ -79,8 +97,14 @@ export default function ProductsPage() {
               />
             </div>
             <div className="flex-1">
-              <label className="text-sub block text-[13px] mb-1">Qty on hand</label>
+              <label
+                htmlFor="product-quantity"
+                className="text-sub block text-[13px] mb-1"
+              >
+                Qty on hand
+              </label>
               <input
+                id="product-quantity"
                 type="number"
                 value={quantityOnHand}
                 onChange={(e) => setQuantityOnHand(e.target.value)}
@@ -90,10 +114,14 @@ export default function ProductsPage() {
             </div>
           </div>
           <div>
-            <label className="text-sub block text-[13px] mb-1">
+            <label
+              htmlFor="product-low-stock-threshold"
+              className="text-sub block text-[13px] mb-1"
+            >
               Low-stock threshold override (optional)
             </label>
             <input
+              id="product-low-stock-threshold"
               type="number"
               value={lowStockThreshold}
               onChange={(e) => setLowStockThreshold(e.target.value)}
@@ -133,10 +161,14 @@ export default function ProductsPage() {
                 ₱{p.sellingPrice.toFixed(2)} · {p.quantityOnHand} in stock
               </div>
             </div>
-            {p.lowStockStatus === "low" && <span className="pill utang">low</span>}
+            {p.lowStockStatus === "low" && (
+              <span className="pill utang">low</span>
+            )}
           </Link>
         ))}
-        {products.length === 0 && <p className="text-sub text-center py-8">No products found</p>}
+        {products.length === 0 && (
+          <p className="text-sub text-center py-8">No products found</p>
+        )}
       </div>
     </main>
   );

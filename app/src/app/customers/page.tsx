@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
+import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
 
 export default function CustomersPage() {
@@ -50,12 +50,16 @@ export default function CustomersPage() {
             className="card flex items-center justify-between px-3 py-3"
           >
             <span className="font-semibold">{c.name}</span>
-            <span className={c.balance > 0 ? "pill utang" : "text-sub text-[13px]"}>
+            <span
+              className={c.balance > 0 ? "pill utang" : "text-sub text-[13px]"}
+            >
               {c.balance > 0 ? `₱${c.balance.toFixed(2)} owed` : "settled"}
             </span>
           </Link>
         ))}
-        {sorted.length === 0 && <p className="text-sub text-center py-8">No customers yet</p>}
+        {sorted.length === 0 && (
+          <p className="text-sub text-center py-8">No customers yet</p>
+        )}
       </div>
     </main>
   );

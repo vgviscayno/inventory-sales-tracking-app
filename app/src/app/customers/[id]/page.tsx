@@ -1,4 +1,4 @@
-import { Id } from "../../../../convex/_generated/dataModel";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { CustomerProfile } from "./CustomerProfile";
 
 export default async function CustomerProfilePage({

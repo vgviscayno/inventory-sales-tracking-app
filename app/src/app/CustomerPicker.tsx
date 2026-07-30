@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { useState } from "react";
 import { api } from "../../convex/_generated/api";
-import { Id } from "../../convex/_generated/dataModel";
+import type { Id } from "../../convex/_generated/dataModel";
 
 export function CustomerPicker({
   value,
@@ -16,14 +16,20 @@ export function CustomerPicker({
   const createCustomer = useMutation(api.customers.create);
   const [query, setQuery] = useState("");
 
-  const matches = customers.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
+  const matches = customers.filter((c) =>
+    c.name.toLowerCase().includes(query.toLowerCase()),
+  );
   const selected = customers.find((c) => c._id === value);
 
   if (selected) {
     return (
       <div className="card flex items-center justify-between px-3 py-2.5">
         <span className="font-medium">{selected.name}</span>
-        <button className="text-accent font-semibold" onClick={() => onChange(null)}>
+        <button
+          type="button"
+          className="text-accent font-semibold"
+          onClick={() => onChange(null)}
+        >
           change
         </button>
       </div>
@@ -39,8 +45,11 @@ export function CustomerPicker({
 
   return (
     <div className="space-y-1.5">
-      <label className="text-sub block text-[13px]">Customer</label>
+      <label htmlFor="customer-query" className="text-sub block text-[13px]">
+        Customer
+      </label>
       <input
+        id="customer-query"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search or add customer name"
@@ -51,14 +60,21 @@ export function CustomerPicker({
           {matches.map((c) => (
             <button
               key={c._id}
+              type="button"
               className="block w-full px-3 py-2 text-left"
               onClick={() => onChange(c._id)}
             >
               {c.name}
             </button>
           ))}
-          {!matches.some((c) => c.name.toLowerCase() === query.trim().toLowerCase()) && (
-            <button className="text-accent block w-full px-3 py-2 text-left font-semibold" onClick={handleCreate}>
+          {!matches.some(
+            (c) => c.name.toLowerCase() === query.trim().toLowerCase(),
+          ) && (
+            <button
+              type="button"
+              className="text-accent block w-full px-3 py-2 text-left font-semibold"
+              onClick={handleCreate}
+            >
               + Add &quot;{query.trim()}&quot; as new customer
             </button>
           )}

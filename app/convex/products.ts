@@ -1,16 +1,16 @@
-import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
 
 const DEFAULT_THRESHOLD = 10;
 
-function withStatus<T extends { quantityOnHand: number; lowStockThreshold?: number }>(
-  product: T,
-  globalThreshold: number
-) {
+function withStatus<
+  T extends { quantityOnHand: number; lowStockThreshold?: number },
+>(product: T, globalThreshold: number) {
   const threshold = product.lowStockThreshold ?? globalThreshold;
   return {
     ...product,
-    lowStockStatus: product.quantityOnHand <= threshold ? ("low" as const) : ("ok" as const),
+    lowStockStatus:
+      product.quantityOnHand <= threshold ? ("low" as const) : ("ok" as const),
   };
 }
 
@@ -37,7 +37,10 @@ export const get = query({
     const product = await ctx.db.get(id);
     if (!product) return null;
     const settings = await ctx.db.query("appSettings").first();
-    return withStatus(product, settings?.lowStockThreshold ?? DEFAULT_THRESHOLD);
+    return withStatus(
+      product,
+      settings?.lowStockThreshold ?? DEFAULT_THRESHOLD,
+    );
   },
 });
 
@@ -67,7 +70,9 @@ export const update = mutation({
   handler: async (ctx, { id, lowStockThreshold, ...patch }) => {
     await ctx.db.patch(id, {
       ...patch,
-      ...(lowStockThreshold !== undefined ? { lowStockThreshold: lowStockThreshold ?? undefined } : {}),
+      ...(lowStockThreshold !== undefined
+        ? { lowStockThreshold: lowStockThreshold ?? undefined }
+        : {}),
     });
   },
 });

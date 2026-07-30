@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
-import { Id } from "../../convex/_generated/dataModel";
+import type { Id } from "../../convex/_generated/dataModel";
 import { CustomerPicker } from "./CustomerPicker";
 
 type CartLine = {
@@ -16,7 +16,8 @@ type CartLine = {
 
 export default function RegisterPage() {
   const [search, setSearch] = useState("");
-  const products = useQuery(api.products.list, { search: search || undefined }) ?? [];
+  const products =
+    useQuery(api.products.list, { search: search || undefined }) ?? [];
   const createSale = useMutation(api.sales.create);
 
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -31,7 +32,7 @@ export default function RegisterPage() {
       const existing = prev.find((l) => l.productId === product._id);
       if (existing) {
         return prev.map((l) =>
-          l.productId === product._id ? { ...l, quantity: l.quantity + 1 } : l
+          l.productId === product._id ? { ...l, quantity: l.quantity + 1 } : l,
         );
       }
       return [
@@ -51,23 +52,38 @@ export default function RegisterPage() {
     setCart((prev) =>
       quantity <= 0
         ? prev.filter((l) => l.productId !== productId)
-        : prev.map((l) => (l.productId === productId ? { ...l, quantity } : l))
+        : prev.map((l) => (l.productId === productId ? { ...l, quantity } : l)),
     );
   }
 
   const total = cart.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
   const hasOversell = cart.some((l) => l.quantity > l.quantityOnHand);
   const canCheckout =
-    cart.length > 0 && !hasOversell && (paymentMethod === "cash" || customerId !== null);
+    cart.length > 0 &&
+    !hasOversell &&
+    (paymentMethod === "cash" || customerId !== null);
+
+  useEffect(() => {
+    if (!checkoutOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setCheckoutOpen(false);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [checkoutOpen]);
 
   async function completeSale() {
     setSubmitting(true);
     setError(null);
     try {
       await createSale({
-        customerId: paymentMethod === "utang" ? customerId! : undefined,
+        customerId:
+          paymentMethod === "utang" ? (customerId ?? undefined) : undefined,
         paymentMethod,
-        items: cart.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+        items: cart.map((l) => ({
+          productId: l.productId,
+          quantity: l.quantity,
+        })),
       });
       setCart([]);
       setCheckoutOpen(false);
@@ -95,6 +111,7 @@ export default function RegisterPage() {
             return (
               <button
                 key={p._id}
+                type="button"
                 onClick={() => addToCart(p)}
                 className={`card relative p-3 text-left ${inCart ? "border-accent" : ""}`}
               >
@@ -114,7 +131,9 @@ export default function RegisterPage() {
             );
           })}
           {products.length === 0 && (
-            <p className="col-span-2 text-center text-sub py-8">No products found</p>
+            <p className="col-span-2 text-center text-sub py-8">
+              No products found
+            </p>
           )}
         </div>
       </div>
@@ -122,6 +141,7 @@ export default function RegisterPage() {
       {cart.length > 0 && !checkoutOpen && (
         <div className="fixed left-0 right-0 bottom-[70px] mx-auto max-w-[480px] px-3.5">
           <button
+            type="button"
             onClick={() => setCheckoutOpen(true)}
             className="card flex w-full items-center justify-between px-3 py-3 shadow-[0_4px_16px_rgba(0,0,0,.12)]"
           >
@@ -135,7 +155,14 @@ export default function RegisterPage() {
       )}
 
       {checkoutOpen && (
-        <div className="fixed inset-0 z-20 bg-black/35" onClick={() => setCheckoutOpen(false)}>
+        // biome-ignore lint/a11y/noStaticElementInteractions: mouse-only dismiss; Escape handled in useEffect above
+        // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only dismiss; Escape handled in useEffect above
+        <div
+          className="fixed inset-0 z-20 bg-black/35"
+          onClick={() => setCheckoutOpen(false)}
+        >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: only stops click propagation, not a user affordance */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: only stops click propagation, not a user affordance */}
           <div
             className="card fixed inset-x-0 bottom-0 z-[21] mx-auto max-h-[80vh] max-w-[480px] overflow-y-auto rounded-t-2xl rounded-b-none px-3.5 pt-4 pb-[76px]"
             onClick={(e) => e.stopPropagation()}
@@ -145,23 +172,34 @@ export default function RegisterPage() {
 
             <div className="space-y-2">
               {cart.map((l) => (
-                <div key={l.productId} className="flex items-center justify-between gap-2">
+                <div
+                  key={l.productId}
+                  className="flex items-center justify-between gap-2"
+                >
                   <div>
                     <div>{l.name}</div>
-                    <div className="text-sub text-[13px]">₱{l.unitPrice.toFixed(2)} each</div>
+                    <div className="text-sub text-[13px]">
+                      ₱{l.unitPrice.toFixed(2)} each
+                    </div>
                     {l.quantity > l.quantityOnHand && (
-                      <div className="text-danger text-xs">Only {l.quantityOnHand} in stock</div>
+                      <div className="text-danger text-xs">
+                        Only {l.quantityOnHand} in stock
+                      </div>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => setQuantity(l.productId, l.quantity - 1)}
                       className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
                     >
                       −
                     </button>
-                    <span className="min-w-[18px] text-center font-semibold">{l.quantity}</span>
+                    <span className="min-w-[18px] text-center font-semibold">
+                      {l.quantity}
+                    </span>
                     <button
+                      type="button"
                       onClick={() => setQuantity(l.productId, l.quantity + 1)}
                       className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
                     >
@@ -179,16 +217,22 @@ export default function RegisterPage() {
 
             <div className="flex gap-2">
               <button
+                type="button"
                 className={`flex-1 rounded-xl py-2.5 font-semibold ${
-                  paymentMethod === "cash" ? "bg-accent text-accent-ink" : "card"
+                  paymentMethod === "cash"
+                    ? "bg-accent text-accent-ink"
+                    : "card"
                 }`}
                 onClick={() => setPaymentMethod("cash")}
               >
                 Cash
               </button>
               <button
+                type="button"
                 className={`flex-1 rounded-xl py-2.5 font-semibold ${
-                  paymentMethod === "utang" ? "bg-accent text-accent-ink" : "card"
+                  paymentMethod === "utang"
+                    ? "bg-accent text-accent-ink"
+                    : "card"
                 }`}
                 onClick={() => setPaymentMethod("utang")}
               >
@@ -205,6 +249,7 @@ export default function RegisterPage() {
             {error && <p className="text-danger text-sm">{error}</p>}
 
             <button
+              type="button"
               disabled={!canCheckout || submitting}
               onClick={completeSale}
               className="mt-3.5 w-full rounded-xl bg-accent py-3.5 font-bold text-accent-ink disabled:bg-[#d6d3d1]"

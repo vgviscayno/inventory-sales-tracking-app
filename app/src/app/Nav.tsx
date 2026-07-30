@@ -17,7 +17,8 @@ export function Nav() {
   return (
     <nav className="sticky top-0 z-10 flex gap-2 bg-bg px-3.5 pt-2.5">
       {TABS.map((tab) => {
-        const active = tab.href === "/" ? pathname === "/" : pathname.startsWith(tab.href);
+        const active =
+          tab.href === "/" ? pathname === "/" : pathname.startsWith(tab.href);
         return (
           <Link
             key={tab.href}

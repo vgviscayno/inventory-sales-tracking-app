@@ -1,27 +1,31 @@
-import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import { mutation, type QueryCtx, query } from "./_generated/server";
 
-async function computeBalance(ctx: any, customerId: string) {
+async function computeBalance(ctx: QueryCtx, customerId: Id<"customers">) {
   const sales = await ctx.db
     .query("sales")
-    .withIndex("by_customer", (q: any) => q.eq("customerId", customerId))
-    .filter((q: any) => q.eq(q.field("paymentMethod"), "utang"))
+    .withIndex("by_customer", (q) => q.eq("customerId", customerId))
+    .filter((q) => q.eq(q.field("paymentMethod"), "utang"))
     .collect();
 
   let totalCharged = 0;
   for (const sale of sales) {
     const items = await ctx.db
       .query("saleItems")
-      .withIndex("by_sale", (q: any) => q.eq("saleId", sale._id))
+      .withIndex("by_sale", (q) => q.eq("saleId", sale._id))
       .collect();
-    totalCharged += items.reduce((sum: number, item: any) => sum + item.quantity * item.unitPriceAtSale, 0);
+    totalCharged += items.reduce(
+      (sum, item) => sum + item.quantity * item.unitPriceAtSale,
+      0,
+    );
   }
 
   const payments = await ctx.db
     .query("payments")
-    .withIndex("by_customer", (q: any) => q.eq("customerId", customerId))
+    .withIndex("by_customer", (q) => q.eq("customerId", customerId))
     .collect();
-  const totalPaid = payments.reduce((sum: number, p: any) => sum + p.amount, 0);
+  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
   return totalCharged - totalPaid;
 }
@@ -34,7 +38,7 @@ export const list = query({
       customers.map(async (c) => ({
         ...c,
         balance: await computeBalance(ctx, c._id),
-      }))
+      })),
     );
   },
 });
@@ -56,7 +60,11 @@ export const create = mutation({
 });
 
 export const update = mutation({
-  args: { id: v.id("customers"), name: v.optional(v.string()), notes: v.optional(v.string()) },
+  args: {
+    id: v.id("customers"),
+    name: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  },
   handler: async (ctx, { id, ...patch }) => {
     await ctx.db.patch(id, patch);
   },

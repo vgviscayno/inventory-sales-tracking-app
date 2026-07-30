@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, expectedSessionToken } from "@/lib/auth";
+import { type NextRequest, NextResponse } from "next/server";
+import { expectedSessionToken, SESSION_COOKIE } from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
   const cookie = request.cookies.get(SESSION_COOKIE)?.value;

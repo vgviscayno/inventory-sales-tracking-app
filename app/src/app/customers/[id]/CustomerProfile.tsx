@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
+import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
-export function CustomerProfile({ customerId }: { customerId: Id<"customers"> }) {
+export function CustomerProfile({
+  customerId,
+}: {
+  customerId: Id<"customers">;
+}) {
   const customer = useQuery(api.customers.get, { id: customerId });
   const sales = useQuery(api.sales.listForCustomer, { customerId }) ?? [];
   const payments = useQuery(api.payments.listForCustomer, { customerId }) ?? [];
@@ -26,7 +30,12 @@ export function CustomerProfile({ customerId }: { customerId: Id<"customers"> })
     const value = Number(amount);
     if (!value || value <= 0) return;
     setSubmitting(true);
-    await recordPayment({ customerId, amount: value, paidAt: Date.now(), notes: notes || undefined });
+    await recordPayment({
+      customerId,
+      amount: value,
+      paidAt: Date.now(),
+      notes: notes || undefined,
+    });
     setAmount("");
     setNotes("");
     setSubmitting(false);
@@ -36,8 +45,18 @@ export function CustomerProfile({ customerId }: { customerId: Id<"customers"> })
   const history = [
     ...sales
       .filter((s) => s.paymentMethod === "utang")
-      .map((s) => ({ type: "charge" as const, id: s._id, amount: s.totalAmount, at: s.createdAt })),
-    ...payments.map((p) => ({ type: "payment" as const, id: p._id, amount: p.amount, at: p.paidAt })),
+      .map((s) => ({
+        type: "charge" as const,
+        id: s._id,
+        amount: s.totalAmount,
+        at: s.createdAt,
+      })),
+    ...payments.map((p) => ({
+      type: "payment" as const,
+      id: p._id,
+      amount: p.amount,
+      at: p.paidAt,
+    })),
   ].sort((a, b) => b.at - a.at);
 
   return (
@@ -50,7 +69,9 @@ export function CustomerProfile({ customerId }: { customerId: Id<"customers"> })
         <h2 className="text-lg font-semibold">{customer.name}</h2>
         <div
           className="mt-2 text-[22px] font-bold"
-          style={{ color: customer.balance > 0 ? "var(--utang)" : "var(--ink)" }}
+          style={{
+            color: customer.balance > 0 ? "var(--utang)" : "var(--ink)",
+          }}
         >
           ₱{customer.balance.toFixed(2)}
         </div>
@@ -60,6 +81,7 @@ export function CustomerProfile({ customerId }: { customerId: Id<"customers"> })
       <h3 className="mb-2 text-sm font-semibold">Record a payment</h3>
       {!formOpen ? (
         <button
+          type="button"
           onClick={() => setFormOpen(true)}
           className="w-full rounded-xl bg-accent py-3.5 font-bold text-accent-ink"
         >
@@ -68,19 +90,30 @@ export function CustomerProfile({ customerId }: { customerId: Id<"customers"> })
       ) : (
         <form onSubmit={handleRecordPayment} className="space-y-2.5">
           <div>
-            <label className="text-sub block text-[13px] mb-1">Amount received</label>
+            <label
+              htmlFor="payment-amount"
+              className="text-sub block text-[13px] mb-1"
+            >
+              Amount received
+            </label>
             <input
+              id="payment-amount"
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0"
               className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
-              autoFocus
             />
           </div>
           <div>
-            <label className="text-sub block text-[13px] mb-1">Notes (optional)</label>
+            <label
+              htmlFor="payment-notes"
+              className="text-sub block text-[13px] mb-1"
+            >
+              Notes (optional)
+            </label>
             <input
+              id="payment-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
@@ -112,13 +145,21 @@ export function CustomerProfile({ customerId }: { customerId: Id<"customers"> })
             key={`${h.type}-${h.id}`}
             className="flex justify-between border-b border-line py-1.5"
           >
-            <span className="text-sub">{h.type === "charge" ? "Utang sale" : "Payment"}</span>
-            <span style={{ color: h.type === "charge" ? "var(--utang)" : "var(--accent)" }}>
+            <span className="text-sub">
+              {h.type === "charge" ? "Utang sale" : "Payment"}
+            </span>
+            <span
+              style={{
+                color: h.type === "charge" ? "var(--utang)" : "var(--accent)",
+              }}
+            >
               {h.type === "charge" ? "+" : "−"}₱{h.amount.toFixed(2)}
             </span>
           </div>
         ))}
-        {history.length === 0 && <p className="text-sub text-center py-8">No activity yet</p>}
+        {history.length === 0 && (
+          <p className="text-sub text-center py-8">No activity yet</p>
+        )}
       </div>
     </main>
   );
