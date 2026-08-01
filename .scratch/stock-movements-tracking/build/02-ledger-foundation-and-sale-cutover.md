@@ -45,7 +45,13 @@ stockMovements: defineTable({
 
 `quantity` is a **signed delta** so every cache update is a plain add with no per-type branching: create patches by `quantity`, edit by `(new - old)`, delete by `-quantity`.
 
+The sign convention is redundant with the `type` discriminant sitting beside it, and today it lives only in a schema comment — nothing stops a positive `pullout`. When this ticket lands the mutation that writes movements, put the sign behind one constructor derived from `type` rather than leaving each call site to remember it.
+
 The sale-total rewrite is the highest-risk change here: `quantity` is now negative, so a total summed as `quantity * unitPriceAtSale` comes out negative. Get the sign wrong and every utang balance in the app silently flips.
+
+**Inherited from 01:** ticket 01 landed only the stub `stockMovements` the harness needed (`type`, `productId`, `quantity`, `createdAt`, `by_product`). The rest of the shape above — `deliveries`, `pullouts`, `refId`, `by_refId`, `unitPriceAtSale`, `reasonCategory`, `reasonNotes` — is this ticket's to add.
+
+With no public mutation writing the ledger, 01's harness seeds `stockMovements` through `t.run(ctx.db.insert)` and `expectCacheMatchesLedger` reads the product and its movements through `t.run` too — both bypass the function boundary the harness exists to exercise. Once this ticket lands `sales.create` writing the ledger, convert that seeding to the public mutation and reconsider whether the assertion can read the product through a public query.
 
 **Blocked by:** 01 — Test harness at the Convex function boundary.
 
@@ -59,5 +65,6 @@ The sale-total rewrite is the highest-risk change here: `quantity` is now negati
 - [ ] The customer utang balance derives `totalCharged` the same way
 - [ ] A test with a mixed cash/utang history plus a payment produces the same balance the `saleItems` implementation produced — the sign is right
 - [ ] The cache == ledger-sum helper passes for every product touched by a sale
+- [ ] The harness's `t.run(ctx.db.insert)` ledger seeding is replaced by the public mutation
 - [ ] Both deployments are cleared before the deploy, and the deploy is a single one
 - [ ] No throwaway migration mutation enters the repo

@@ -8,9 +8,9 @@ The one assertion this feature exists to protect gets a shared helper here: for 
 
 **Status:** ready-for-agent
 
-- [ ] `vitest` and `convex-test` are installed and a `convexTest(schema)` instance can be created per test
-- [ ] `test` and `test:watch` scripts sit alongside the existing `lint` script
-- [ ] The suite lives in the `app/convex` tree, next to the functions it exercises
-- [ ] A shared assertion helper asserts cache == ledger-sum for a product, and is exported for reuse
-- [ ] One smoke test drives an existing public mutation and reads the result back through a public query, proving the harness sees the real database
-- [ ] No test imports a handler's internals; nothing is tested in isolation unless it is a public export
+- [x] `vitest` and `convex-test` are installed and a `convexTest(schema)` instance can be created per test
+- [x] `test` and `test:watch` scripts sit alongside the existing `lint` script
+- [x] The suite lives in the `app/convex` tree, next to the functions it exercises
+- [x] A shared assertion helper asserts cache == ledger-sum for a product, and is exported for reuse
+- [x] One smoke test drives an existing public mutation and reads the result back through a public query, proving the harness sees the real database
+- [x] No test imports a handler's internals; nothing is tested in isolation unless it is a public export
