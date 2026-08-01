@@ -38,17 +38,6 @@ export default defineSchema({
     lowStockThreshold: v.number(),
   }),
 
-  // Headers exist only so `stockMovements.refId` has tables to reference; the
-  // mutations that write them, and `deliveries.supplierId`, arrive with the
-  // tickets that own them.
-  deliveries: defineTable({
-    createdAt: v.number(),
-  }),
-
-  pullouts: defineTable({
-    createdAt: v.number(),
-  }),
-
   stockMovements: defineTable({
     type: v.union(
       v.literal("sale"),
@@ -56,18 +45,9 @@ export default defineSchema({
       v.literal("pullout"),
       v.literal("opening"),
     ),
-    // undefined for "opening" rows
-    refId: v.optional(
-      v.union(v.id("sales"), v.id("deliveries"), v.id("pullouts")),
-    ),
     productId: v.id("products"),
     // signed: +delivery/opening, -sale/pullout
     quantity: v.number(),
-    unitPriceAtSale: v.optional(v.number()),
-    reasonCategory: v.optional(v.string()),
-    reasonNotes: v.optional(v.string()),
     createdAt: v.number(),
-  })
-    .index("by_product", ["productId"])
-    .index("by_refId", ["refId"]),
+  }).index("by_product", ["productId"]),
 });
