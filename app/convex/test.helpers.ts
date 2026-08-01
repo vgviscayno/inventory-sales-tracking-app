@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { expect } from "vitest";
+import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
@@ -22,7 +23,21 @@ export function setupTest() {
   return convexTest(schema, modules);
 }
 
-type TestConvex = ReturnType<typeof setupTest>;
+export type TestConvex = ReturnType<typeof setupTest>;
+
+/** A product created through the public mutation, holding `quantityOnHand`. */
+export async function aProductHolding(
+  t: TestConvex,
+  quantityOnHand: number,
+  overrides: { name?: string; sellingPrice?: number } = {},
+) {
+  return await t.mutation(api.products.create, {
+    name: "Coke 1.5L",
+    sellingPrice: 75,
+    ...overrides,
+    quantityOnHand,
+  });
+}
 
 /**
  * The invariant this whole feature exists to protect: a product's cached
