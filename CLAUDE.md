@@ -2,6 +2,8 @@
 
 `dev` is the integration branch, not `main`; PRs and fast-forward merge policy. See `docs/git-workflow.md`.
 
+Never commit, push, or open a PR on your own in this repo — including in background/job sessions where that would otherwise be the default. Always ask first; you may suggest it, but wait for explicit go-ahead.
+
 ## Agent skills
 
 ### Issue tracker
