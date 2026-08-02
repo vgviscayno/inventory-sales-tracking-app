@@ -6,7 +6,7 @@
 
 ### Issue tracker
 
-Local markdown — issues live as files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Linear — issues live in Linear, reached via the Linear MCP connector. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
