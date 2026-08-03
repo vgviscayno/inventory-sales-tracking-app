@@ -7,6 +7,9 @@ const TABS = [
   { href: "/", label: "Register" },
   { href: "/products", label: "Products" },
   { href: "/customers", label: "Customers" },
+  // PROTOTYPE ONLY — throwaway 4th tab, so the Movements-tab variants are
+  // judged against the real nav. Remove with app/src/app/movements/prototype.
+  { href: "/movements/prototype", label: "Movements" },
 ];
 
 export function Nav() {

@@ -2,10 +2,24 @@
 
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { buildLedger } from "../../../prototype/ledger";
+// PROTOTYPE ONLY — throwaway, resolving:
+// INV-18 (Movement history surface) — https://linear.app/inventory-sales-tracking/issue/INV-18
+// Remove this block (and the ./prototype directory) when folding the winner in.
+import { PrototypeSwitcher } from "../../../prototype/PrototypeSwitcher";
+import { VariantA } from "./prototype/VariantA";
+import { VariantB } from "./prototype/VariantB";
+import { VariantC } from "./prototype/VariantC";
+
+const PROTOTYPE_VARIANTS = [
+  { key: "A", label: "Product page IS the ledger (rev 2)" },
+  { key: "B", label: "Movements tab, grouped entries" },
+  { key: "C", label: "Both surfaces, line-level edit" },
+];
 
 type Product = {
   _id: Id<"products">;
@@ -19,11 +33,29 @@ type Product = {
 export function ProductDetail({ productId }: { productId: Id<"products"> }) {
   const product = useQuery(api.products.get, { id: productId });
 
+  // PROTOTYPE ONLY — the stub ledger is built from every product so grouped
+  // entries span more than one, the way real deliveries do.
+  const allProducts = useQuery(api.products.list, {});
+  const searchParams = useSearchParams();
+  const variant = searchParams.get("variant");
+  const ledger = useMemo(() => buildLedger(allProducts ?? []), [allProducts]);
+
   if (product === undefined) {
     return <main className="text-sub flex-1 p-4">Loading...</main>;
   }
   if (product === null) {
     return <main className="text-sub flex-1 p-4">Product not found</main>;
+  }
+
+  if (variant) {
+    return (
+      <>
+        {variant === "A" && <VariantA product={product} ledger={ledger} />}
+        {variant === "B" && <VariantB product={product} ledger={ledger} />}
+        {variant === "C" && <VariantC product={product} ledger={ledger} />}
+        <PrototypeSwitcher variants={PROTOTYPE_VARIANTS} current={variant} />
+      </>
+    );
   }
 
   return <ProductForm key={product._id} product={product} />;
