@@ -37,4 +37,17 @@ export default defineSchema({
   appSettings: defineTable({
     lowStockThreshold: v.number(),
   }),
+
+  stockMovements: defineTable({
+    type: v.union(
+      v.literal("sale"),
+      v.literal("delivery"),
+      v.literal("pullout"),
+      v.literal("opening"),
+    ),
+    productId: v.id("products"),
+    // signed: +delivery/opening, -sale/pullout
+    quantity: v.number(),
+    createdAt: v.number(),
+  }).index("by_product", ["productId"]),
 });
