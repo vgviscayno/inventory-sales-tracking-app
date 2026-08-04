@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, type QueryCtx, query } from "./_generated/server";
+import { saleTotal } from "./stockMovements";
 
 async function computeBalance(ctx: QueryCtx, customerId: Id<"customers">) {
   const sales = await ctx.db
@@ -11,14 +12,7 @@ async function computeBalance(ctx: QueryCtx, customerId: Id<"customers">) {
 
   let totalCharged = 0;
   for (const sale of sales) {
-    const items = await ctx.db
-      .query("saleItems")
-      .withIndex("by_sale", (q) => q.eq("saleId", sale._id))
-      .collect();
-    totalCharged += items.reduce(
-      (sum, item) => sum + item.quantity * item.unitPriceAtSale,
-      0,
-    );
+    totalCharged += await saleTotal(ctx, sale._id);
   }
 
   const payments = await ctx.db

@@ -20,13 +20,6 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_customer", ["customerId"]),
 
-  saleItems: defineTable({
-    saleId: v.id("sales"),
-    productId: v.id("products"),
-    quantity: v.number(),
-    unitPriceAtSale: v.number(),
-  }).index("by_sale", ["saleId"]),
-
   payments: defineTable({
     customerId: v.id("customers"),
     amount: v.number(),
@@ -38,6 +31,17 @@ export default defineSchema({
     lowStockThreshold: v.number(),
   }),
 
+  // A delivery or pull-out header groups the movement rows that arrived
+  // together, so a five-product shipment reads as one event. Sales already have
+  // their own header table. `suppliers` arrives in a later ticket.
+  deliveries: defineTable({
+    createdAt: v.number(),
+  }),
+
+  pullouts: defineTable({
+    createdAt: v.number(),
+  }),
+
   stockMovements: defineTable({
     type: v.union(
       v.literal("sale"),
@@ -45,9 +49,20 @@ export default defineSchema({
       v.literal("pullout"),
       v.literal("opening"),
     ),
+    // The header this row belongs to; undefined for "opening" rows, which
+    // stand alone.
+    refId: v.optional(
+      v.union(v.id("sales"), v.id("deliveries"), v.id("pullouts")),
+    ),
     productId: v.id("products"),
-    // signed: +delivery/opening, -sale/pullout
+    // Signed delta: +delivery/opening, -sale/pullout. Only `recordMovement`
+    // in `stockMovements.ts` decides the sign — see the note there.
     quantity: v.number(),
+    unitPriceAtSale: v.optional(v.number()), // only when type === "sale"
+    reasonCategory: v.optional(v.string()), // only when type === "pullout"
+    reasonNotes: v.optional(v.string()), // only when type === "pullout"
     createdAt: v.number(),
-  }).index("by_product", ["productId"]),
+  })
+    .index("by_product", ["productId"])
+    .index("by_refId", ["refId"]),
 });

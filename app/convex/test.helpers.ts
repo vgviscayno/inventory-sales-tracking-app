@@ -44,8 +44,9 @@ export async function aProductHolding(
     ...overrides,
   });
 
-  // No public mutation writes the ledger yet; deferred to the stock-movements
-  // ticket, which will seed opening stock through its own mutation.
+  // `products.create` still sets a count directly, so nothing public writes the
+  // opening row that accounts for it. INV-24's backfill is what makes opening
+  // stock a ledger write; this seeding follows it there.
   await t.run(async (ctx) => {
     await ctx.db.insert("stockMovements", {
       type: "opening",
@@ -56,6 +57,11 @@ export async function aProductHolding(
   });
 
   return productId;
+}
+
+/** A customer created through the public mutation, owing nothing yet. */
+export async function aCustomer(t: TestConvex, name = "Aling Nena") {
+  return await t.mutation(api.customers.create, { name });
 }
 
 /**
@@ -70,8 +76,10 @@ export async function expectCacheMatchesLedger(
   const product = await t.query(api.products.get, { id: productId });
   if (!product) throw new Error(`No product with id ${productId}`);
 
-  // No public query reads the ledger yet; deferred to the stock-movements
-  // ticket, which will expose it.
+  // The raw ledger is deliberately read raw: this assertion's whole job is to
+  // check the cache against the rows themselves, so going through a query that
+  // derives anything would weaken it. The product side goes through the public
+  // query, which is where drift would actually be observed.
   const movements = await t.run(async (ctx) =>
     ctx.db
       .query("stockMovements")

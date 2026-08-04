@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { recordMovement, saleTotal } from "./stockMovements";
 
 export const listForCustomer = query({
   args: { customerId: v.id("customers") },
@@ -11,17 +12,10 @@ export const listForCustomer = query({
       .collect();
 
     return await Promise.all(
-      sales.map(async (sale) => {
-        const items = await ctx.db
-          .query("saleItems")
-          .withIndex("by_sale", (q) => q.eq("saleId", sale._id))
-          .collect();
-        const totalAmount = items.reduce(
-          (sum, i) => sum + i.quantity * i.unitPriceAtSale,
-          0,
-        );
-        return { ...sale, items, totalAmount };
-      }),
+      sales.map(async (sale) => ({
+        ...sale,
+        totalAmount: await saleTotal(ctx, sale._id),
+      })),
     );
   },
 });
@@ -62,12 +56,9 @@ export const create = mutation({
     });
 
     for (const { item, product } of resolvedItems) {
-      await ctx.db.patch(item.productId, {
-        quantityOnHand: product.quantityOnHand - item.quantity,
-      });
-
-      await ctx.db.insert("saleItems", {
-        saleId,
+      await recordMovement(ctx, {
+        type: "sale",
+        refId: saleId,
         productId: item.productId,
         quantity: item.quantity,
         unitPriceAtSale: product.sellingPrice,
