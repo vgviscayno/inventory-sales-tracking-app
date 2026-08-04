@@ -55,8 +55,9 @@ export default defineSchema({
       v.union(v.id("sales"), v.id("deliveries"), v.id("pullouts")),
     ),
     productId: v.id("products"),
-    // Signed delta: +delivery/opening, -sale/pullout. Only `recordMovement`
-    // in `stockMovements.ts` decides the sign — see the note there.
+    // Signed delta: +delivery/opening, -sale/pullout. `stockMovements.ts` is
+    // the only module that writes this table, and the only one that decides
+    // the sign — see the notes there.
     quantity: v.number(),
     unitPriceAtSale: v.optional(v.number()), // only when type === "sale"
     reasonCategory: v.optional(v.string()), // only when type === "pullout"
