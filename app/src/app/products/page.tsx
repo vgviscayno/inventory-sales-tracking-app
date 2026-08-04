@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
+import { StockStatusPill } from "../StockStatusPill";
 
 export default function ProductsPage() {
   const [search, setSearch] = useState("");
@@ -161,9 +162,7 @@ export default function ProductsPage() {
                 ₱{p.sellingPrice.toFixed(2)} · {p.quantityOnHand} in stock
               </div>
             </div>
-            {p.lowStockStatus === "low" && (
-              <span className="pill utang">low</span>
-            )}
+            <StockStatusPill status={p.lowStockStatus} />
           </Link>
         ))}
         {products.length === 0 && (

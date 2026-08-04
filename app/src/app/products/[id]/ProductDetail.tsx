@@ -1,20 +1,17 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { StockStatusPill } from "../../StockStatusPill";
 
-type Product = {
-  _id: Id<"products">;
-  name: string;
-  sellingPrice: number;
-  quantityOnHand: number;
-  lowStockThreshold?: number;
-  lowStockStatus: "low" | "ok";
-};
+// Derived from the query rather than restated, so a new field — or a new stock
+// status — reaches this form without anyone remembering to widen a type here.
+type Product = NonNullable<FunctionReturnType<typeof api.products.get>>;
 
 export function ProductDetail({ productId }: { productId: Id<"products"> }) {
   const product = useQuery(api.products.get, { id: productId });
@@ -147,9 +144,10 @@ function ProductForm({ product }: { product: Product }) {
             className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
           />
         </div>
-        {product.lowStockStatus === "low" && (
-          <span className="pill utang inline-block">currently low</span>
-        )}
+        <StockStatusPill
+          status={product.lowStockStatus}
+          className="inline-block"
+        />
         <button
           type="submit"
           disabled={saving || !canSave}
