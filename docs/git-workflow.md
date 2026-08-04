@@ -73,6 +73,16 @@ Pre-build `prototype` / `grilling` tickets branch off `dev`, as always. A discov
 
 Neither is ever merged back. The answer lands in Linear; the code is deleted when the Linear ticket is Done.
 
+## Commits
+
+Committing is never self-initiated — wait for explicit go-ahead. Once given, the go-ahead covers the whole sequence below; don't come back for a second approval to push.
+
+Shape the branch's working changes into a **series of atomic commits**, each a logical unit a human can review on its own — schema change, then the code that uses it, then its tests, and so on. A single commit is fine when the change genuinely is one unit; several tiny mechanical commits are not better than one coherent one.
+
+Then push to the branch's remote upstream (`git push -u origin <branch>` the first time).
+
+Ticket branches are squash-merged into the project branch, so this commit series is reviewer scaffolding, not permanent history — it exists to make the PR readable and disappears on merge.
+
 ## Fast-forward-only constraint
 
 The `dev` → `main` merge must be fast-forward (`git merge --ff-only dev` while on `main`). This only works if `main` has no commits `dev` doesn't already contain.

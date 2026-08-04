@@ -4,6 +4,8 @@
 
 Never commit, push, or open a PR on your own in this repo — including in background/job sessions where that would otherwise be the default. Always ask first; you may suggest it, but wait for explicit go-ahead.
 
+Once cleared to commit: group the working changes into a series of atomic, reviewer-friendly commits (a single commit if that's genuinely the whole unit), then push to the branch's remote upstream — no second approval needed for the push.
+
 Don't use git worktrees in this repo — use plain branches. Background agents are held to this by `worktree.bgIsolation: "none"` in `.claude/settings.json`.
 
 ## Agent skills
