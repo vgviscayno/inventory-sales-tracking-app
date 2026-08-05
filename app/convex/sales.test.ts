@@ -94,6 +94,85 @@ test("a sale line cannot carry a negative quantity", async () => {
   await expectCacheMatchesLedger(t, coke);
 });
 
+test("a sale that would drive stock negative is refused without the flag", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 2, { sellingPrice: 75 });
+
+  await expect(
+    t.mutation(api.sales.create, {
+      paymentMethod: "cash",
+      items: [{ productId: coke, quantity: 3 }],
+    }),
+  ).rejects.toThrow(/Coke 1\.5L/);
+
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    quantityOnHand: 2,
+  });
+  await expectCacheMatchesLedger(t, coke);
+});
+
+test("the same product across two lines is refused on their sum, not per line", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 4);
+
+  await expect(
+    t.mutation(api.sales.create, {
+      paymentMethod: "cash",
+      items: [
+        { productId: coke, quantity: 3 },
+        { productId: coke, quantity: 3 },
+      ],
+    }),
+  ).rejects.toThrow();
+
+  await expectCacheMatchesLedger(t, coke);
+});
+
+test("allowNegative records the sale and lands the negative count", async () => {
+  const t = setupTest();
+  const customerId = await aCustomer(t);
+  const coke = await aProductHolding(t, 2, { sellingPrice: 75 });
+
+  // One flag for the whole call — one confirm gesture, one save.
+  await t.mutation(api.sales.create, {
+    customerId,
+    paymentMethod: "utang",
+    items: [{ productId: coke, quantity: 5 }],
+    allowNegative: true,
+  });
+
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    quantityOnHand: -3,
+  });
+  expect(
+    await t.query(api.sales.listForCustomer, { customerId }),
+  ).toMatchObject([{ totalAmount: 375 }]);
+  await expectCacheMatchesLedger(t, coke);
+});
+
+test("a sale off an already-negative count is still refused without the flag", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 1);
+
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: coke, quantity: 4 }],
+    allowNegative: true,
+  });
+
+  await expect(
+    t.mutation(api.sales.create, {
+      paymentMethod: "cash",
+      items: [{ productId: coke, quantity: 1 }],
+    }),
+  ).rejects.toThrow();
+
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    quantityOnHand: -3,
+  });
+  await expectCacheMatchesLedger(t, coke);
+});
+
 test("a sale charges the price at the time, not the price today", async () => {
   const t = setupTest();
   const customerId = await aCustomer(t);

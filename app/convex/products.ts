@@ -7,11 +7,16 @@ function withStatus<
   T extends { quantityOnHand: number; lowStockThreshold?: number },
 >(product: T, globalThreshold: number) {
   const threshold = product.lowStockThreshold ?? globalThreshold;
-  return {
-    ...product,
-    lowStockStatus:
-      product.quantityOnHand <= threshold ? ("low" as const) : ("ok" as const),
-  };
+  // Negative first, and it has to stay first: a negative count is also
+  // `<= threshold`, so the low case would swallow it and render "order more"
+  // over what is really "this count is wrong, recount".
+  const lowStockStatus =
+    product.quantityOnHand < 0
+      ? ("negative" as const)
+      : product.quantityOnHand <= threshold
+        ? ("low" as const)
+        : ("ok" as const);
+  return { ...product, lowStockStatus };
 }
 
 export const list = query({

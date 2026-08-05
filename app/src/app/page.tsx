@@ -5,19 +5,30 @@ import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { CustomerPicker } from "./CustomerPicker";
+import { StockStatusPill } from "./StockStatusPill";
 
+/**
+ * A cart holds what she rang up — nothing about the product itself. Name,
+ * price and count are read live off the products query at render, so the
+ * warning is judged against the count as it stands now, not as it stood when
+ * the item was tapped. A stale count is what would let a sale reach the server
+ * unwarned, get refused, and strand her at the counter.
+ */
 type CartLine = {
   productId: Id<"products">;
-  name: string;
-  unitPrice: number;
   quantity: number;
-  quantityOnHand: number;
 };
 
 export default function RegisterPage() {
   const [search, setSearch] = useState("");
-  const products =
-    useQuery(api.products.list, { search: search || undefined }) ?? [];
+  // Unfiltered, and searched client-side: the cart needs live counts for
+  // products the search box has scrolled out of view.
+  const allProducts = useQuery(api.products.list, {}) ?? [];
+  const products = search
+    ? allProducts.filter((p) =>
+        p.name.toLowerCase().includes(search.toLowerCase()),
+      )
+    : allProducts;
   const createSale = useMutation(api.sales.create);
 
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -26,8 +37,13 @@ export default function RegisterPage() {
   const [customerId, setCustomerId] = useState<Id<"customers"> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Whether she has been shown the below-zero warning yet — the click that sets
+  // it is the warning, and the next one is the consent. Cleared whenever the
+  // cart changes, so consent never carries over to a sale she has not seen.
+  const [warned, setWarned] = useState(false);
 
   function addToCart(product: (typeof products)[number]) {
+    setWarned(false);
     setCart((prev) => {
       const existing = prev.find((l) => l.productId === product._id);
       if (existing) {
@@ -35,20 +51,12 @@ export default function RegisterPage() {
           l.productId === product._id ? { ...l, quantity: l.quantity + 1 } : l,
         );
       }
-      return [
-        ...prev,
-        {
-          productId: product._id,
-          name: product.name,
-          unitPrice: product.sellingPrice,
-          quantity: 1,
-          quantityOnHand: product.quantityOnHand,
-        },
-      ];
+      return [...prev, { productId: product._id, quantity: 1 }];
     });
   }
 
   function setQuantity(productId: Id<"products">, quantity: number) {
+    setWarned(false);
     setCart((prev) =>
       quantity <= 0
         ? prev.filter((l) => l.productId !== productId)
@@ -56,12 +64,23 @@ export default function RegisterPage() {
     );
   }
 
-  const total = cart.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
-  const hasOversell = cart.some((l) => l.quantity > l.quantityOnHand);
+  // Each cart line joined to the product as it stands right now. A product
+  // deleted mid-sale drops out of both the display and the save.
+  const lines = cart.flatMap((line) => {
+    const product = allProducts.find((p) => p._id === line.productId);
+    return product ? [{ ...line, product }] : [];
+  });
+
+  const total = lines.reduce(
+    (sum, l) => sum + l.product.sellingPrice * l.quantity,
+    0,
+  );
+  // Lines this sale would drive below zero. They warn — they never block. The
+  // customer is at the counter holding the goods, so refusing the write buys an
+  // unrecorded sale and a permanently wrong utang balance.
+  const oversold = lines.filter((l) => l.quantity > l.product.quantityOnHand);
   const canCheckout =
-    cart.length > 0 &&
-    !hasOversell &&
-    (paymentMethod === "cash" || customerId !== null);
+    lines.length > 0 && (paymentMethod === "cash" || customerId !== null);
 
   useEffect(() => {
     if (!checkoutOpen) return;
@@ -73,6 +92,11 @@ export default function RegisterPage() {
   }, [checkoutOpen]);
 
   async function completeSale() {
+    if (oversold.length > 0 && !warned) {
+      setWarned(true);
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -80,17 +104,24 @@ export default function RegisterPage() {
         customerId:
           paymentMethod === "utang" ? (customerId ?? undefined) : undefined,
         paymentMethod,
-        items: cart.map((l) => ({
+        items: lines.map((l) => ({
           productId: l.productId,
           quantity: l.quantity,
         })),
+        allowNegative: warned,
       });
       setCart([]);
       setCheckoutOpen(false);
       setPaymentMethod("cash");
       setCustomerId(null);
+      setWarned(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
+      // The server refused, so it is telling her something the client's counts
+      // did not — stock moved under her between render and save. Arm the
+      // confirm on its message rather than leaving her stuck: the whole point
+      // is that no refusal is ever the last word at the counter.
+      setWarned(true);
     } finally {
       setSubmitting(false);
     }
@@ -119,9 +150,10 @@ export default function RegisterPage() {
                 <div className="text-sub text-[13px]">
                   ₱{p.sellingPrice.toFixed(2)} · {p.quantityOnHand} left
                 </div>
-                {p.lowStockStatus === "low" && (
-                  <span className="pill utang mt-1 inline-block">low</span>
-                )}
+                <StockStatusPill
+                  status={p.lowStockStatus}
+                  className="mt-1 inline-block"
+                />
                 {inCart && (
                   <span className="absolute top-2 right-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-accent-ink">
                     {inCart.quantity}
@@ -171,19 +203,19 @@ export default function RegisterPage() {
             <h3 className="mb-2.5 font-semibold">Checkout</h3>
 
             <div className="space-y-2">
-              {cart.map((l) => (
+              {lines.map((l) => (
                 <div
                   key={l.productId}
                   className="flex items-center justify-between gap-2"
                 >
                   <div>
-                    <div>{l.name}</div>
+                    <div>{l.product.name}</div>
                     <div className="text-sub text-[13px]">
-                      ₱{l.unitPrice.toFixed(2)} each
+                      ₱{l.product.sellingPrice.toFixed(2)} each
                     </div>
-                    {l.quantity > l.quantityOnHand && (
+                    {l.quantity > l.product.quantityOnHand && (
                       <div className="text-danger text-xs">
-                        Only {l.quantityOnHand} in stock
+                        Only {l.product.quantityOnHand} on hand
                       </div>
                     )}
                   </div>
@@ -248,13 +280,45 @@ export default function RegisterPage() {
 
             {error && <p className="text-danger text-sm">{error}</p>}
 
+            {/* Only when the client's own counts show the overdraw. On the
+                server-refusal path `oversold` is empty and the error above is
+                the warning — claiming a below-zero line the counts don't show
+                would be a lie. */}
+            {warned && oversold.length > 0 && (
+              <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
+                <p className="font-semibold text-danger">
+                  This will take stock below zero
+                </p>
+                <ul className="mt-1 space-y-0.5 text-[13px]">
+                  {oversold.map((l) => (
+                    <li key={l.productId}>
+                      <span className="font-semibold">{l.product.name}</span> —
+                      only {l.product.quantityOnHand} on hand, selling{" "}
+                      {l.quantity} (leaves{" "}
+                      {l.product.quantityOnHand - l.quantity})
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1.5 text-sub text-[13px]">
+                  Record the sale anyway — the count is what needs fixing, not
+                  the sale. Recount these after.
+                </p>
+              </div>
+            )}
+
             <button
               type="button"
               disabled={!canCheckout || submitting}
               onClick={completeSale}
-              className="mt-3.5 w-full rounded-xl bg-accent py-3.5 font-bold text-accent-ink disabled:bg-[#d6d3d1]"
+              className={`mt-3.5 w-full rounded-xl py-3.5 font-bold text-accent-ink disabled:bg-[#d6d3d1] ${
+                warned ? "bg-danger" : "bg-accent"
+              }`}
             >
-              {submitting ? "Completing..." : "Complete Sale"}
+              {submitting
+                ? "Completing..."
+                : warned
+                  ? "Record sale anyway"
+                  : "Complete Sale"}
             </button>
           </div>
         </div>
