@@ -8,11 +8,13 @@
  * @module
  */
 
+import type * as backfills from "../backfills.js";
 import type * as customers from "../customers.js";
 import type * as payments from "../payments.js";
 import type * as products from "../products.js";
 import type * as sales from "../sales.js";
 import type * as settings from "../settings.js";
+import type * as stockMovements from "../stockMovements.js";
 
 import type {
   ApiFromModules,
@@ -21,11 +23,13 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  backfills: typeof backfills;
   customers: typeof customers;
   payments: typeof payments;
   products: typeof products;
   sales: typeof sales;
   settings: typeof settings;
+  stockMovements: typeof stockMovements;
 }>;
 
 /**

@@ -6,6 +6,7 @@ import { expect } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import { recordOpeningBalance } from "./stockMovements";
 
 // The Convex bundler leaves test files and this helper module out of the
 // deployed function set. Apply the same rule here — vite's glob has no working
@@ -44,16 +45,15 @@ export async function aProductHolding(
     ...overrides,
   });
 
-  // `products.create` still sets a count directly, so nothing public writes the
-  // opening row that accounts for it. INV-24's backfill is what makes opening
-  // stock a ledger write; this seeding follows it there.
+  // `products.create` still sets a count directly, so nothing in the create
+  // path writes the opening row that accounts for it. This is the same helper
+  // the backfill runs over every product, called on the one just made — the
+  // fixture stays on the real code path without depending on a one-off
+  // mutation that is meant to be deleted once it has run everywhere.
   await t.run(async (ctx) => {
-    await ctx.db.insert("stockMovements", {
-      type: "opening",
-      productId,
-      quantity: quantityOnHand,
-      createdAt: Date.now(),
-    });
+    const product = await ctx.db.get(productId);
+    if (!product) throw new Error(`No product with id ${productId}`);
+    await recordOpeningBalance(ctx, product);
   });
 
   return productId;
