@@ -35,9 +35,6 @@ function ProductForm({ product }: { product: Product }) {
   const [sellingPrice, setSellingPrice] = useState(
     String(product.sellingPrice),
   );
-  const [quantityOnHand, setQuantityOnHand] = useState(
-    String(product.quantityOnHand),
-  );
   const [lowStockThreshold, setLowStockThreshold] = useState(
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "",
   );
@@ -45,11 +42,7 @@ function ProductForm({ product }: { product: Product }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  const canSave =
-    name.trim() &&
-    Number(sellingPrice) > 0 &&
-    quantityOnHand.trim() !== "" &&
-    Number(quantityOnHand) >= 0;
+  const canSave = name.trim() && Number(sellingPrice) > 0;
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -59,7 +52,6 @@ function ProductForm({ product }: { product: Product }) {
       id: product._id,
       name: name.trim(),
       sellingPrice: Number(sellingPrice),
-      quantityOnHand: Number(quantityOnHand),
       lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
     });
     setSaving(false);
@@ -113,21 +105,15 @@ function ProductForm({ product }: { product: Product }) {
             />
           </div>
           <div className="flex-1">
-            <label
-              htmlFor="edit-quantity"
-              className="text-sub block text-[13px] mb-1"
-            >
-              Qty on hand
-            </label>
-            <input
-              id="edit-quantity"
-              type="number"
-              value={quantityOnHand}
-              onChange={(e) => setQuantityOnHand(e.target.value)}
-              className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
-            />
+            <div className="text-sub block text-[13px] mb-1">Qty on hand</div>
+            <div className="px-2.5 py-2.5 text-[15px] font-semibold">
+              {product.quantityOnHand}
+            </div>
           </div>
         </div>
+        <Link href="/movements" className="text-accent block text-[13px]">
+          Log a delivery to change this count →
+        </Link>
         <div>
           <label
             htmlFor="edit-low-stock-threshold"

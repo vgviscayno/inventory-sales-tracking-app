@@ -10,6 +10,7 @@
 
 import type * as backfills from "../backfills.js";
 import type * as customers from "../customers.js";
+import type * as deliveries from "../deliveries.js";
 import type * as payments from "../payments.js";
 import type * as products from "../products.js";
 import type * as sales from "../sales.js";
@@ -25,6 +26,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   backfills: typeof backfills;
   customers: typeof customers;
+  deliveries: typeof deliveries;
   payments: typeof payments;
   products: typeof products;
   sales: typeof sales;

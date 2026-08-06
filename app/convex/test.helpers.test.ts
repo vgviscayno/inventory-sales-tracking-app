@@ -23,8 +23,13 @@ test("the invariant fails when the cache has drifted from the ledger", async () 
   const productId = await aProductHolding(t, 20);
 
   // Move the cached count without a matching movement — exactly the drift the
-  // assertion exists to catch.
-  await t.mutation(api.products.update, { id: productId, quantityOnHand: 19 });
+  // assertion exists to catch. `products.update` no longer accepts
+  // `quantityOnHand` at all (that escape hatch is closed), so drift can only
+  // be simulated by reaching under the public API, which is also the only way
+  // it could happen for real now.
+  await t.run(async (ctx) => {
+    await ctx.db.patch(productId, { quantityOnHand: 19 });
+  });
 
   await expect(expectCacheMatchesLedger(t, productId)).rejects.toThrow();
 });

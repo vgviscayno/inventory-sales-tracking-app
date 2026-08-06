@@ -53,11 +53,18 @@ export const create = mutation({
   args: {
     name: v.string(),
     sellingPrice: v.number(),
-    quantityOnHand: v.number(),
+    // Optional, defaulting to 0: the product form no longer collects a
+    // starting count — delivery logging is the only way to raise one. This
+    // stays an arg (rather than disappearing) for callers that legitimately
+    // know a count up front, like the opening-balance backfill's fixtures.
+    quantityOnHand: v.optional(v.number()),
     lowStockThreshold: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
-    return await ctx.db.insert("products", args);
+  handler: async (ctx, { quantityOnHand, ...args }) => {
+    return await ctx.db.insert("products", {
+      ...args,
+      quantityOnHand: quantityOnHand ?? 0,
+    });
   },
 });
 
@@ -66,7 +73,9 @@ export const update = mutation({
     id: v.id("products"),
     name: v.optional(v.string()),
     sellingPrice: v.optional(v.number()),
-    quantityOnHand: v.optional(v.number()),
+    // No `quantityOnHand` here, deliberately: it is the one field this
+    // mutation must never touch. Delivery (and pull-out) logging are the only
+    // writers of a product's count from here on — see `stockMovements.ts`.
     // null clears the per-product override back to the global default;
     // omitted leaves the existing value untouched (Convex drops `undefined`
     // args before the mutation runs, so `undefined` can't signal "clear").

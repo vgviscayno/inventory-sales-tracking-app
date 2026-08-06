@@ -15,15 +15,10 @@ export default function ProductsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
-  const [quantityOnHand, setQuantityOnHand] = useState("");
   const [lowStockThreshold, setLowStockThreshold] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const canAdd =
-    name.trim() &&
-    Number(sellingPrice) > 0 &&
-    quantityOnHand.trim() !== "" &&
-    Number(quantityOnHand) >= 0;
+  const canAdd = name.trim() && Number(sellingPrice) > 0;
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -32,14 +27,12 @@ export default function ProductsPage() {
     await createProduct({
       name: name.trim(),
       sellingPrice: Number(sellingPrice),
-      quantityOnHand: Number(quantityOnHand),
       lowStockThreshold: lowStockThreshold
         ? Number(lowStockThreshold)
         : undefined,
     });
     setName("");
     setSellingPrice("");
-    setQuantityOnHand("");
     setLowStockThreshold("");
     setAdding(false);
     setFormOpen(false);
@@ -80,40 +73,26 @@ export default function ProductsPage() {
               className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
             />
           </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label
-                htmlFor="product-selling-price"
-                className="text-sub block text-[13px] mb-1"
-              >
-                Selling price
-              </label>
-              <input
-                id="product-selling-price"
-                type="number"
-                value={sellingPrice}
-                onChange={(e) => setSellingPrice(e.target.value)}
-                placeholder="0"
-                className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
-              />
-            </div>
-            <div className="flex-1">
-              <label
-                htmlFor="product-quantity"
-                className="text-sub block text-[13px] mb-1"
-              >
-                Qty on hand
-              </label>
-              <input
-                id="product-quantity"
-                type="number"
-                value={quantityOnHand}
-                onChange={(e) => setQuantityOnHand(e.target.value)}
-                placeholder="0"
-                className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
-              />
-            </div>
+          <div>
+            <label
+              htmlFor="product-selling-price"
+              className="text-sub block text-[13px] mb-1"
+            >
+              Selling price
+            </label>
+            <input
+              id="product-selling-price"
+              type="number"
+              value={sellingPrice}
+              onChange={(e) => setSellingPrice(e.target.value)}
+              placeholder="0"
+              className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+            />
           </div>
+          <p className="text-sub text-[13px]">
+            Starts at 0 in stock — log a delivery on the Movements tab to add
+            stock once it&apos;s saved.
+          </p>
           <div>
             <label
               htmlFor="product-low-stock-threshold"

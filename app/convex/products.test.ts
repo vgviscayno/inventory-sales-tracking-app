@@ -18,6 +18,36 @@ test("a product created through the mutation reads back through the query", asyn
   });
 });
 
+test("creating a product without a quantity starts it at zero", async () => {
+  const t = setupTest();
+
+  const id = await t.mutation(api.products.create, {
+    name: "New Product",
+    sellingPrice: 20,
+  });
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    quantityOnHand: 0,
+  });
+});
+
+test("updating a product cannot set its quantity on hand directly", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 20);
+
+  await expect(
+    t.mutation(api.products.update, {
+      id,
+      // @ts-expect-error quantityOnHand is not part of this mutation's args
+      quantityOnHand: 5,
+    }),
+  ).rejects.toThrow();
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    quantityOnHand: 20,
+  });
+});
+
 test("a count at or under the threshold reads as low", async () => {
   const t = setupTest();
 
