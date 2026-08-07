@@ -21,6 +21,53 @@ export const listForCustomer = query({
   },
 });
 
+/**
+ * Sales newest first, each with its lines joined to the product name at the
+ * time of reading, the net change the whole entry carried, and the
+ * customer's name when the sale named one — the shape the Movements tab
+ * renders one row per sale from, once sales are opted into that view.
+ */
+export const list = query({
+  args: {},
+  handler: async (ctx) => {
+    const sales = await ctx.db.query("sales").order("desc").collect();
+
+    return await Promise.all(
+      sales.map(async (sale) => {
+        const movements = await ctx.db
+          .query("stockMovements")
+          .withIndex("by_refId", (q) => q.eq("refId", sale._id))
+          .collect();
+
+        const lines = await Promise.all(
+          movements.map(async (m) => {
+            const product = await ctx.db.get(m.productId);
+            return {
+              productId: m.productId,
+              productName: product?.name ?? "Deleted product",
+              quantity: m.quantity,
+            };
+          }),
+        );
+
+        const customer = sale.customerId
+          ? await ctx.db.get(sale.customerId)
+          : null;
+
+        return {
+          _id: sale._id,
+          createdAt: sale.createdAt,
+          paymentMethod: sale.paymentMethod,
+          customerName: customer?.name,
+          lines,
+          netChange: lines.reduce((sum, l) => sum + l.quantity, 0),
+          totalAmount: await saleTotal(ctx, sale._id),
+        };
+      }),
+    );
+  },
+});
+
 export const create = mutation({
   args: {
     customerId: v.optional(v.id("customers")),

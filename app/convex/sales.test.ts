@@ -173,6 +173,44 @@ test("a sale off an already-negative count is still refused without the flag", a
   await expectCacheMatchesLedger(t, coke);
 });
 
+test("sales list newest first, each carrying its lines, net change, and customer name", async () => {
+  const t = setupTest();
+  const customerId = await aCustomer(t, "Aling Nena");
+  const coke = await aProductHolding(t, 20, { name: "Coke 1.5L" });
+  const pancit = await aProductHolding(t, 10, {
+    name: "Lucky Me Pancit Canton",
+  });
+
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: coke, quantity: 3 }],
+  });
+  await t.mutation(api.sales.create, {
+    customerId,
+    paymentMethod: "utang",
+    items: [
+      { productId: coke, quantity: 2 },
+      { productId: pancit, quantity: 1 },
+    ],
+  });
+
+  const entries = await t.query(api.sales.list, {});
+
+  expect(entries).toHaveLength(2);
+  // Newest first.
+  expect(entries[0].netChange).toBe(-3);
+  expect(entries[0].customerName).toBe("Aling Nena");
+  expect(entries[0].lines).toMatchObject([
+    { productName: "Coke 1.5L", quantity: -2 },
+    { productName: "Lucky Me Pancit Canton", quantity: -1 },
+  ]);
+  expect(entries[1].netChange).toBe(-3);
+  expect(entries[1].customerName).toBeUndefined();
+  expect(entries[1].lines).toMatchObject([
+    { productName: "Coke 1.5L", quantity: -3 },
+  ]);
+});
+
 test("a sale charges the price at the time, not the price today", async () => {
   const t = setupTest();
   const customerId = await aCustomer(t);
