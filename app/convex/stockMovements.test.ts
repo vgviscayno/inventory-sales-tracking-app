@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import {
   aCustomer,
   aProductHolding,
@@ -98,4 +98,31 @@ test("running balance accumulates oldest to newest, in a mixed sequence", async 
 
   // Newest first: +3 delivery (10), -8 pullout (7), +5 delivery (15), opening (10).
   expect(rows.map((r) => r.runningBalance)).toEqual([10, 7, 15, 10]);
+});
+
+test("a backfilled opening row still sorts as the oldest, even when the backfill runs after other movements", async () => {
+  const t = setupTest();
+
+  // A product created directly with a count and sold from before the backfill
+  // ever ran — its opening row is written after the sale's `createdAt`, but
+  // has to read as the oldest row regardless.
+  const coke = await t.mutation(api.products.create, {
+    name: "Coke 1.5L",
+    sellingPrice: 75,
+    quantityOnHand: 20,
+  });
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: coke, quantity: 3 }],
+  });
+  await t.mutation(internal.backfills.openingBalances, {});
+
+  const rows = await t.query(api.stockMovements.listForProduct, {
+    productId: coke,
+  });
+
+  expect(rows).toHaveLength(2);
+  expect(rows[0].type).toBe("sale");
+  expect(rows[1].type).toBe("opening");
+  await expectCacheMatchesLedger(t, coke);
 });

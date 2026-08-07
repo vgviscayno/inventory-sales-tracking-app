@@ -98,11 +98,23 @@ export async function recordOpeningBalance(
 
   const alreadyExplained = movements.reduce((sum, m) => sum + m.quantity, 0);
 
+  // An opening row explains what came before every other row for this
+  // product, which is a fact about the ledger's story, not about when the
+  // backfill happened to run. Stamping it with `Date.now()` would place it
+  // after any movement recorded before the backfill ran — the ledger's oldest
+  // row landing last in a chronological read. Backdating it to just before
+  // the earliest existing movement (or now, if there are none) keeps it first
+  // regardless of when this actually runs.
+  const earliestExisting = movements.reduce(
+    (min, m) => Math.min(min, m.createdAt),
+    Date.now(),
+  );
+
   await ctx.db.insert("stockMovements", {
     type: "opening",
     productId: product._id,
     quantity: product.quantityOnHand - alreadyExplained,
-    createdAt: Date.now(),
+    createdAt: movements.length > 0 ? earliestExisting - 1 : earliestExisting,
   });
   return true;
 }
