@@ -7,11 +7,28 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { formatTime, signed } from "../../format";
 import { StockStatusPill } from "../../StockStatusPill";
+import { WindowedDayList } from "../../WindowedDayList";
 
 // Derived from the query rather than restated, so a new field — or a new stock
 // status — reaches this form without anyone remembering to widen a type here.
 type Product = NonNullable<FunctionReturnType<typeof api.products.get>>;
+
+type LedgerRow = FunctionReturnType<
+  typeof api.stockMovements.listForProduct
+>[number];
+
+const LEDGER_HEADER_H = 30;
+const LEDGER_ROW_H = 58;
+const LEDGER_VIEWPORT_H = 420;
+
+const LEDGER_LABEL: Record<LedgerRow["type"], string> = {
+  opening: "Opening balance",
+  delivery: "Delivery",
+  pullout: "Pull-out",
+  sale: "Sale",
+};
 
 export function ProductDetail({ productId }: { productId: Id<"products"> }) {
   const product = useQuery(api.products.get, { id: productId });
@@ -171,6 +188,80 @@ function ProductForm({ product }: { product: Product }) {
               : "Delete Product"}
         </button>
       </div>
+
+      <ProductLedger productId={product._id} />
     </main>
+  );
+}
+
+/**
+ * Every `stockMovements` row for this product, newest first under day
+ * headings — the answer to "why does it say N?" sitting directly under N.
+ * Reuses the Movements tab's day-grouped windowed list so a year of history
+ * renders as cheaply here as it does there.
+ */
+function ProductLedger({ productId }: { productId: Id<"products"> }) {
+  const rows = useQuery(api.stockMovements.listForProduct, { productId });
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sub text-[13px] font-semibold uppercase tracking-wide">
+        Ledger
+      </h3>
+      <WindowedDayList
+        rows={rows ?? []}
+        headerH={LEDGER_HEADER_H}
+        rowH={LEDGER_ROW_H}
+        viewportH={LEDGER_VIEWPORT_H}
+        empty={rows === undefined ? "Loading…" : "No movements yet"}
+        renderRow={(row) => <LedgerRowView row={row} />}
+      />
+    </div>
+  );
+}
+
+function ledgerContext(row: LedgerRow): string | null {
+  if (row.type === "sale" && row.lineTotal !== undefined) {
+    return `₱${row.lineTotal.toFixed(2)}`;
+  }
+  if (row.type === "pullout" && row.reasonCategory) {
+    return row.reasonNotes
+      ? `${row.reasonCategory} — ${row.reasonNotes}`
+      : row.reasonCategory;
+  }
+  // No supplier field exists yet — see schema.ts's note on the `deliveries`
+  // table — but the row's context slot is here, ready for the suppliers
+  // ticket to fill in without touching layout.
+  if (row.type === "delivery") return "No supplier yet";
+  return null;
+}
+
+function LedgerRowView({ row }: { row: LedgerRow }) {
+  const context = ledgerContext(row);
+  const changeColor =
+    row.netChange > 0
+      ? "text-accent"
+      : row.netChange < 0
+        ? "text-danger"
+        : "text-sub";
+
+  return (
+    <div className="flex h-full w-full items-center justify-between px-3">
+      <div className="min-w-0">
+        <div className="truncate text-[14px] font-semibold">
+          {LEDGER_LABEL[row.type]}
+        </div>
+        <div className="text-sub truncate text-[11px]">
+          {formatTime(row.createdAt)}
+          {context ? ` · ${context}` : ""}
+        </div>
+      </div>
+      <div className="shrink-0 pl-3 text-right">
+        <div className={`font-bold ${changeColor}`}>
+          {signed(row.netChange)}
+        </div>
+        <div className="text-sub text-[11px]">→ {row.runningBalance}</div>
+      </div>
+    </div>
   );
 }
