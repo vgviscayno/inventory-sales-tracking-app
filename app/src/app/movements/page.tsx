@@ -6,6 +6,7 @@ import { api } from "../../../convex/_generated/api";
 import { DeliverySheet } from "./DeliverySheet";
 import { formatTime, signed } from "./format";
 import { PulloutSheet } from "./PulloutSheet";
+import { type TypeFilter, useMovementsFilter } from "./useMovementsFilter";
 import { WindowedDayList } from "./WindowedDayList";
 
 const HEADER_H = 30;
@@ -14,28 +15,62 @@ const VIEWPORT_H = 520;
 
 type Entry =
   | ({ kind: "delivery" } & ReturnType<typeof useDeliveries>[number])
-  | ({ kind: "pullout" } & ReturnType<typeof usePullouts>[number]);
+  | ({ kind: "pullout" } & ReturnType<typeof usePullouts>[number])
+  | ({ kind: "sale" } & ReturnType<typeof useSales>[number]);
 
-function useDeliveries() {
-  return useQuery(api.deliveries.list, {}) ?? [];
+function useDeliveries(enabled: boolean) {
+  return useQuery(api.deliveries.list, enabled ? {} : "skip") ?? [];
 }
 
-function usePullouts() {
-  return useQuery(api.pullouts.list, {}) ?? [];
+function usePullouts(enabled: boolean) {
+  return useQuery(api.pullouts.list, enabled ? {} : "skip") ?? [];
+}
+
+function useSales(enabled: boolean) {
+  return useQuery(api.sales.list, enabled ? {} : "skip") ?? [];
+}
+
+const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
+  { value: "all", label: "Deliveries & pull-outs" },
+  { value: "deliveries", label: "Deliveries" },
+  { value: "pullouts", label: "Pull-outs" },
+];
+
+function emptyMessage(typeFilter: TypeFilter, includeSales: boolean) {
+  const kinds = [];
+  if (typeFilter !== "pullouts") kinds.push("deliveries");
+  if (typeFilter !== "deliveries") kinds.push("pull-outs");
+  if (includeSales) kinds.push("sales");
+  return `No ${kinds.join(" or ")} logged yet`;
 }
 
 export default function MovementsPage() {
-  const deliveries = useDeliveries();
-  const pullouts = usePullouts();
-  // Both entry kinds newest first individually, so a stable merge sort keeps
-  // that order intact — reinterleaved only by createdAt across the two.
+  const { typeFilter, setTypeFilter, includeSales, setIncludeSales } =
+    useMovementsFilter();
+
+  const showDeliveries = typeFilter !== "pullouts";
+  const showPullouts = typeFilter !== "deliveries";
+
+  const deliveries = useDeliveries(showDeliveries);
+  const pullouts = usePullouts(showPullouts);
+  const sales = useSales(includeSales);
+
+  // Every included kind is already newest first, so a stable merge sort keeps
+  // that order intact — reinterleaved only by createdAt across the kinds.
   const entries: Entry[] = useMemo(
     () =>
       [
-        ...deliveries.map((d) => ({ kind: "delivery" as const, ...d })),
-        ...pullouts.map((p) => ({ kind: "pullout" as const, ...p })),
+        ...(showDeliveries
+          ? deliveries.map((d) => ({ kind: "delivery" as const, ...d }))
+          : []),
+        ...(showPullouts
+          ? pullouts.map((p) => ({ kind: "pullout" as const, ...p }))
+          : []),
+        ...(includeSales
+          ? sales.map((s) => ({ kind: "sale" as const, ...s }))
+          : []),
       ].sort((a, b) => b.createdAt - a.createdAt),
-    [deliveries, pullouts],
+    [showDeliveries, deliveries, showPullouts, pullouts, includeSales, sales],
   );
 
   const [deliverySheetOpen, setDeliverySheetOpen] = useState(false);
@@ -62,21 +97,57 @@ export default function MovementsPage() {
         </button>
       </div>
 
+      <div className="flex flex-wrap gap-1.5">
+        {TYPE_FILTERS.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            onClick={() => setTypeFilter(f.value)}
+            className={`rounded-full px-3 py-1.5 text-[12px] font-semibold ${
+              typeFilter === f.value
+                ? "bg-accent text-accent-ink"
+                : "card text-ink"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setIncludeSales(!includeSales)}
+          aria-pressed={includeSales}
+          className={`rounded-full border px-3 py-1.5 text-[12px] font-semibold ${
+            includeSales
+              ? "border-accent bg-accent text-accent-ink"
+              : "border-line text-ink"
+          }`}
+        >
+          Include sales
+        </button>
+      </div>
+
       <WindowedDayList
         rows={entries}
         headerH={HEADER_H}
         rowH={ROW_H}
         viewportH={VIEWPORT_H}
+        empty={emptyMessage(typeFilter, includeSales)}
         renderRow={(entry) => (
           <div className="flex h-full w-full items-center justify-between px-3">
             <div className="min-w-0">
               <div className="truncate text-[14px] font-semibold">
-                {entry.kind === "delivery" ? "Delivery" : "Pull-out"}
+                {entry.kind === "delivery" && "Delivery"}
+                {entry.kind === "pullout" && "Pull-out"}
+                {entry.kind === "sale" && "Sale"}
               </div>
               <div className="text-sub truncate text-[11px]">
                 {formatTime(entry.createdAt)}
-                {entry.kind === "pullout" && ` · ${entry.reasonCategory}`} ·{" "}
-                {entry.lines.length} product
+                {entry.kind === "pullout" && ` · ${entry.reasonCategory}`}
+                {entry.kind === "sale" &&
+                  ` · ${entry.paymentMethod}${
+                    entry.customerName ? ` · ${entry.customerName}` : ""
+                  }`}{" "}
+                · {entry.lines.length} product
                 {entry.lines.length === 1 ? "" : "s"} ·{" "}
                 {entry.lines.map((l) => l.productName).join(", ")}
               </div>
