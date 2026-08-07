@@ -1,5 +1,6 @@
+import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { type MutationCtx, type QueryCtx, query } from "./_generated/server";
 
 /**
  * The sign each movement type carries. A `stockMovements` row stores `quantity`
@@ -97,11 +98,23 @@ export async function recordOpeningBalance(
 
   const alreadyExplained = movements.reduce((sum, m) => sum + m.quantity, 0);
 
+  // An opening row explains what came before every other row for this
+  // product, which is a fact about the ledger's story, not about when the
+  // backfill happened to run. Stamping it with `Date.now()` would place it
+  // after any movement recorded before the backfill ran — the ledger's oldest
+  // row landing last in a chronological read. Backdating it to just before
+  // the earliest existing movement (or now, if there are none) keeps it first
+  // regardless of when this actually runs.
+  const earliestExisting = movements.reduce(
+    (min, m) => Math.min(min, m.createdAt),
+    Date.now(),
+  );
+
   await ctx.db.insert("stockMovements", {
     type: "opening",
     productId: product._id,
     quantity: product.quantityOnHand - alreadyExplained,
-    createdAt: Date.now(),
+    createdAt: movements.length > 0 ? earliestExisting - 1 : earliestExisting,
   });
   return true;
 }
@@ -125,3 +138,54 @@ export async function saleTotal(ctx: QueryCtx, saleId: Id<"sales">) {
     return total - m.quantity * m.unitPriceAtSale;
   }, 0);
 }
+
+/**
+ * The per-product ledger the product detail page reads: every movement that
+ * ever changed — or, for `opening`, stated — this product's count, newest
+ * first, each carrying the running balance immediately after it. That
+ * balance is why this is computed oldest-first internally and reversed for
+ * return rather than walked backwards from `quantityOnHand`: a backwards walk
+ * would silently agree with a cache that had drifted from its own ledger,
+ * while this one derives the balance from the rows alone, the same source
+ * `expectCacheMatchesLedger` checks the cache against.
+ *
+ * `netChange` names the signed quantity — matching the field the Movements
+ * tab's day-grouped list already keys its headings on — so this ledger reuses
+ * that same list component rather than a second copy of it.
+ */
+export const listForProduct = query({
+  args: { productId: v.id("products") },
+  handler: async (ctx, { productId }) => {
+    const movements = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_product", (q) => q.eq("productId", productId))
+      .collect();
+
+    // `by_product` doesn't order by `createdAt`; a stable sort here is what
+    // makes the running balance (and the reversed, newest-first return)
+    // actually chronological rather than insertion-order-by-accident.
+    const oldestFirst = [...movements].sort(
+      (a, b) => a.createdAt - b.createdAt,
+    );
+
+    let runningBalance = 0;
+    const rows = oldestFirst.map((m) => {
+      runningBalance += m.quantity;
+      return {
+        _id: m._id,
+        type: m.type,
+        createdAt: m.createdAt,
+        netChange: m.quantity,
+        runningBalance,
+        lineTotal:
+          m.type === "sale" && m.unitPriceAtSale !== undefined
+            ? -m.quantity * m.unitPriceAtSale
+            : undefined,
+        reasonCategory: m.reasonCategory,
+        reasonNotes: m.reasonNotes,
+      };
+    });
+
+    return rows.reverse();
+  },
+});

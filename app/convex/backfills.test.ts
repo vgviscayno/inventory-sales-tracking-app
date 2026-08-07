@@ -112,6 +112,12 @@ test("a product that sold before its first backfill opens at what it started wit
     { quantity: 20 },
   ]);
   await expectCacheMatchesLedger(t, coke);
+
+  // The opening row explains what came before the sale, so it has to sort
+  // before it — even though the backfill that wrote it ran after the sale did.
+  const opening = rows.find((m) => m.type === "opening");
+  const sale = rows.find((m) => m.type === "sale");
+  expect(opening?.createdAt).toBeLessThan(sale?.createdAt ?? Number.NaN);
 });
 
 test("the backfill reaches every product row, with no predicate narrowing it", async () => {
