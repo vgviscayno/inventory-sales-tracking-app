@@ -62,8 +62,8 @@ export function SaleEntrySheet({
             return (
               <div
                 key={l.movementId}
-                className={`flex items-center justify-between gap-2 ${
-                  isFocused ? "rounded-lg bg-accent/10 p-1.5 -m-1.5" : ""
+                className={`flex items-center justify-between gap-2 rounded-lg p-1.5 ${
+                  isFocused ? "bg-accent/10" : ""
                 }`}
               >
                 <div className="flex min-w-0 items-center gap-1.5">

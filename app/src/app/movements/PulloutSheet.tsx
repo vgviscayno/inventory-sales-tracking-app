@@ -324,8 +324,8 @@ export function PulloutSheet({
             return (
               <div
                 key={l.key}
-                className={`space-y-1 ${
-                  isFocused ? "rounded-lg bg-accent/10 p-1.5 -m-1.5" : ""
+                className={`space-y-1 rounded-lg p-1.5 ${
+                  isFocused ? "bg-accent/10" : ""
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
