@@ -1,12 +1,12 @@
 ## Git workflow
 
-`dev` is the integration branch, not `main`; PRs and fast-forward merge policy. See `docs/git-workflow.md`.
+`dev` is the integration branch, not `main`.
 
-Never commit, push, or open a PR on your own in this repo — including in background/job sessions where that would otherwise be the default. Always ask first; you may suggest it, but wait for explicit go-ahead.
-
-Once cleared to commit: group the working changes into a series of atomic, reviewer-friendly commits (a single commit if that's genuinely the whole unit), then push to the branch's remote upstream — no second approval needed for the push.
+Never commit, push, or open a PR on your own in this repo — including in background/job sessions where that would otherwise be the default. Always ask first; you may suggest it, but wait for explicit go-ahead. Once cleared, the commit shape and push are covered in `docs/git-workflow.md`.
 
 Don't use git worktrees in this repo — use plain branches. Background agents are held to this by `worktree.bgIsolation: "none"` in `.claude/settings.json`.
+
+Everything else — branch cuts, landing a project, promoting `dev` to `main`, the escape hatch — is in `docs/git-workflow.md`, with `/cut-branch`, `/land-project`, `/promote-to-main`, and `/audit-git-flow` as the skills that execute it.
 
 ## Agent skills
 
