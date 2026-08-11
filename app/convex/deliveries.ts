@@ -4,8 +4,24 @@ import { recordMovement } from "./stockMovements";
 
 export const create = mutation({
   args: {
+    // A line either names a product that already exists, or carries what's
+    // needed to create one — the `kind` literal makes that a type the
+    // handler can switch on instead of a productId/newProduct pair whose
+    // both-or-neither states have to be rejected by hand.
     lines: v.array(
-      v.object({ productId: v.id("products"), quantity: v.number() }),
+      v.union(
+        v.object({
+          kind: v.literal("existing"),
+          productId: v.id("products"),
+          quantity: v.number(),
+        }),
+        v.object({
+          kind: v.literal("new"),
+          name: v.string(),
+          sellingPrice: v.number(),
+          quantity: v.number(),
+        }),
+      ),
     ),
   },
   handler: async (ctx, { lines }) => {
@@ -16,6 +32,9 @@ export const create = mutation({
       if (line.quantity <= 0) {
         throw new Error("Each delivery line must have a positive quantity");
       }
+      if (line.kind === "new" && line.sellingPrice <= 0) {
+        throw new Error("A new product needs a positive selling price");
+      }
     }
 
     const deliveryId = await ctx.db.insert("deliveries", {
@@ -24,12 +43,22 @@ export const create = mutation({
 
     // One `recordMovement` call per line, even when two lines name the same
     // product — each is its own arrival on its own row, not a quantity to
-    // merge before it reaches the ledger.
+    // merge before it reaches the ledger. A line's product is created here,
+    // inside the same mutation as the delivery it arrived on, so the two
+    // either land together or (on any failure) neither does.
     for (const line of lines) {
+      const productId =
+        line.kind === "existing"
+          ? line.productId
+          : await ctx.db.insert("products", {
+              name: line.name,
+              sellingPrice: line.sellingPrice,
+              quantityOnHand: 0,
+            });
       await recordMovement(ctx, {
         type: "delivery",
         refId: deliveryId,
-        productId: line.productId,
+        productId,
         quantity: line.quantity,
       });
     }

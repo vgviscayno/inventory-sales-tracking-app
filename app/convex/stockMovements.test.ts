@@ -12,7 +12,7 @@ test("the opening row is the oldest row, and the newest row's running balance eq
   const coke = await aProductHolding(t, 20);
 
   await t.mutation(api.deliveries.create, {
-    lines: [{ productId: coke, quantity: 5 }],
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
   });
   await t.mutation(api.pullouts.create, {
     lines: [{ productId: coke, quantity: 3 }],
@@ -82,14 +82,14 @@ test("running balance accumulates oldest to newest, in a mixed sequence", async 
   const coke = await aProductHolding(t, 10);
 
   await t.mutation(api.deliveries.create, {
-    lines: [{ productId: coke, quantity: 5 }],
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
   });
   await t.mutation(api.pullouts.create, {
     lines: [{ productId: coke, quantity: 8 }],
     reasonCategory: "expired",
   });
   await t.mutation(api.deliveries.create, {
-    lines: [{ productId: coke, quantity: 3 }],
+    lines: [{ kind: "existing", productId: coke, quantity: 3 }],
   });
 
   const rows = await t.query(api.stockMovements.listForProduct, {

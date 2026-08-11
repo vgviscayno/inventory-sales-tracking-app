@@ -202,7 +202,7 @@ test("cache tracks the ledger through a mixed delivery and pull-out sequence, in
   const coke = await aProductHolding(t, 10, { name: "Coke 1.5L" });
 
   await t.mutation(api.deliveries.create, {
-    lines: [{ productId: coke, quantity: 5 }],
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
   });
   await t.mutation(api.pullouts.create, {
     lines: [{ productId: coke, quantity: 8 }],
@@ -214,7 +214,7 @@ test("cache tracks the ledger through a mixed delivery and pull-out sequence, in
     allowNegative: true,
   });
   await t.mutation(api.deliveries.create, {
-    lines: [{ productId: coke, quantity: 3 }],
+    lines: [{ kind: "existing", productId: coke, quantity: 3 }],
   });
 
   expect(await t.query(api.products.get, { id: coke })).toMatchObject({
