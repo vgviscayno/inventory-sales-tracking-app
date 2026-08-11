@@ -10,7 +10,25 @@ import { useEffect, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 
-type Line = { productId: Id<"products">; quantity: number };
+// A line either names a product that already exists, or (once "+ Add as new
+// product" is chosen) is still collecting the name and price it'll be
+// created with — `key` gives both kinds a stable identity for React and for
+// the bump/setQuantity/removeLine calls below, which don't otherwise care
+// which kind they're touching.
+type Line =
+  | {
+      kind: "existing";
+      key: string;
+      productId: Id<"products">;
+      quantity: number;
+    }
+  | {
+      kind: "new";
+      key: string;
+      name: string;
+      sellingPrice: string;
+      quantity: number;
+    };
 
 export function DeliverySheet({ onClose }: { onClose: () => void }) {
   const allProducts = useQuery(api.products.list, {}) ?? [];
@@ -21,53 +39,91 @@ export function DeliverySheet({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const matches = search.trim()
+  const trimmedSearch = search.trim();
+  const matches = trimmedSearch
     ? allProducts.filter((p) =>
-        p.name.toLowerCase().includes(search.trim().toLowerCase()),
+        p.name.toLowerCase().includes(trimmedSearch.toLowerCase()),
       )
     : [];
 
-  function addLine(productId: Id<"products">) {
+  function addExistingLine(productId: Id<"products">) {
     setLines((prev) => {
-      const existing = prev.find((l) => l.productId === productId);
+      const existing = prev.find(
+        (l) => l.kind === "existing" && l.productId === productId,
+      );
       if (existing) {
         return prev.map((l) =>
-          l.productId === productId ? { ...l, quantity: l.quantity + 1 } : l,
+          l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l,
         );
       }
-      return [...prev, { productId, quantity: 1 }];
+      return [
+        ...prev,
+        { kind: "existing", key: productId, productId, quantity: 1 },
+      ];
     });
     setSearch("");
   }
 
-  function bump(productId: Id<"products">, by: number) {
+  function addNewProductLine(name: string) {
+    setLines((prev) => [
+      ...prev,
+      {
+        kind: "new",
+        key: `new:${Date.now()}`,
+        name,
+        sellingPrice: "",
+        quantity: 1,
+      },
+    ]);
+    setSearch("");
+  }
+
+  function bump(key: string, by: number) {
     setLines((prev) =>
       prev.map((l) =>
-        l.productId === productId
-          ? { ...l, quantity: Math.max(1, l.quantity + by) }
-          : l,
+        l.key === key ? { ...l, quantity: Math.max(1, l.quantity + by) } : l,
       ),
     );
   }
 
-  function setQuantity(productId: Id<"products">, quantity: number) {
+  function setQuantity(key: string, quantity: number) {
     setLines((prev) =>
-      prev.map((l) => (l.productId === productId ? { ...l, quantity } : l)),
+      prev.map((l) => (l.key === key ? { ...l, quantity } : l)),
     );
   }
 
-  function removeLine(productId: Id<"products">) {
-    setLines((prev) => prev.filter((l) => l.productId !== productId));
+  function setNewProductSellingPrice(key: string, sellingPrice: string) {
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key === key && l.kind === "new" ? { ...l, sellingPrice } : l,
+      ),
+    );
   }
 
-  // Each line joined to the product as it stands right now, dropping any line
-  // whose product got deleted mid-edit.
-  const resolvedLines = lines.flatMap((line) => {
+  function removeLine(key: string) {
+    setLines((prev) => prev.filter((l) => l.key !== key));
+  }
+
+  // Existing lines joined to the product as it stands right now, dropping any
+  // line whose product got deleted mid-edit; new lines pass through as-is —
+  // there's no product to join to until save creates one.
+  type ResolvedLine =
+    | (Extract<Line, { kind: "existing" }> & {
+        product: (typeof allProducts)[number];
+      })
+    | Extract<Line, { kind: "new" }>;
+
+  const resolvedLines = lines.flatMap<ResolvedLine>((line) => {
+    if (line.kind === "new") return [line];
     const product = allProducts.find((p) => p._id === line.productId);
     return product ? [{ ...line, product }] : [];
   });
 
-  const canSave = resolvedLines.length > 0;
+  const canSave =
+    resolvedLines.length > 0 &&
+    resolvedLines.every(
+      (l) => l.kind === "existing" || Number(l.sellingPrice) > 0,
+    );
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -83,10 +139,16 @@ export function DeliverySheet({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       await createDelivery({
-        lines: resolvedLines.map((l) => ({
-          productId: l.productId,
-          quantity: l.quantity,
-        })),
+        lines: resolvedLines.map((l) =>
+          l.kind === "existing"
+            ? { kind: "existing", productId: l.productId, quantity: l.quantity }
+            : {
+                kind: "new",
+                name: l.name,
+                sellingPrice: Number(l.sellingPrice),
+                quantity: l.quantity,
+              },
+        ),
       });
       onClose();
     } catch (e) {
@@ -116,13 +178,13 @@ export function DeliverySheet({ onClose }: { onClose: () => void }) {
           className="w-full rounded-[10px] border border-line bg-card px-3 py-2.5 text-[15px]"
         />
 
-        {search.trim() && (
+        {trimmedSearch && (
           <div className="card mt-1.5 max-h-40 divide-y divide-line overflow-y-auto">
             {matches.map((p) => (
               <button
                 key={p._id}
                 type="button"
-                onClick={() => addLine(p._id)}
+                onClick={() => addExistingLine(p._id)}
                 className="flex w-full items-center justify-between px-3 py-2 text-left"
               >
                 <span>{p.name}</span>
@@ -132,9 +194,13 @@ export function DeliverySheet({ onClose }: { onClose: () => void }) {
               </button>
             ))}
             {matches.length === 0 && (
-              <p className="text-sub px-3 py-2 text-[13px]">
-                No products match
-              </p>
+              <button
+                type="button"
+                onClick={() => addNewProductLine(trimmedSearch)}
+                className="text-accent flex w-full items-center px-3 py-2 text-left font-semibold"
+              >
+                + Add "{trimmedSearch}" as new product
+              </button>
             )}
           </div>
         )}
@@ -142,14 +208,34 @@ export function DeliverySheet({ onClose }: { onClose: () => void }) {
         <div className="mt-3 space-y-2">
           {resolvedLines.map((l) => (
             <div
-              key={l.productId}
+              key={l.key}
               className="flex items-center justify-between gap-2"
             >
-              <div className="min-w-0 truncate">{l.product.name}</div>
+              <div className="flex min-w-0 items-center gap-1.5">
+                {l.kind === "new" && (
+                  <span className="pill new shrink-0">New</span>
+                )}
+                <div className="min-w-0 truncate">
+                  {l.kind === "existing" ? l.product.name : l.name}
+                </div>
+              </div>
               <div className="flex shrink-0 items-center gap-2">
+                {l.kind === "new" && (
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={l.sellingPrice}
+                    onChange={(e) =>
+                      setNewProductSellingPrice(l.key, e.target.value)
+                    }
+                    placeholder="Price"
+                    aria-label={`Selling price for ${l.name}`}
+                    className="w-16 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+                  />
+                )}
                 <button
                   type="button"
-                  onClick={() => bump(l.productId, -1)}
+                  onClick={() => bump(l.key, -1)}
                   className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
                 >
                   −
@@ -158,25 +244,22 @@ export function DeliverySheet({ onClose }: { onClose: () => void }) {
                   type="number"
                   value={l.quantity}
                   onChange={(e) =>
-                    setQuantity(
-                      l.productId,
-                      Math.max(1, Number(e.target.value)),
-                    )
+                    setQuantity(l.key, Math.max(1, Number(e.target.value)))
                   }
                   className="w-14 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
                 />
                 <button
                   type="button"
-                  onClick={() => bump(l.productId, 1)}
+                  onClick={() => bump(l.key, 1)}
                   className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
                 >
                   +
                 </button>
                 <button
                   type="button"
-                  onClick={() => removeLine(l.productId)}
+                  onClick={() => removeLine(l.key)}
                   className="text-danger px-1 text-lg leading-none"
-                  aria-label={`Remove ${l.product.name}`}
+                  aria-label={`Remove ${l.kind === "existing" ? l.product.name : l.name}`}
                 >
                   ×
                 </button>

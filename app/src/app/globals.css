@@ -62,3 +62,7 @@ body {
   background: var(--danger);
   color: var(--accent-ink);
 }
+.pill.new {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
