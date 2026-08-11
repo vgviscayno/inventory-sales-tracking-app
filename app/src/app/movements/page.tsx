@@ -3,10 +3,12 @@
 import { useQuery } from "convex/react";
 import { useMemo, useState } from "react";
 import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { formatTime, signed } from "../format";
 import { WindowedDayList } from "../WindowedDayList";
 import { DeliverySheet } from "./DeliverySheet";
 import { PulloutSheet } from "./PulloutSheet";
+import { SaleEntrySheet } from "./SaleEntrySheet";
 import { type TypeFilter, useMovementsFilter } from "./useMovementsFilter";
 
 const HEADER_H = 30;
@@ -73,8 +75,18 @@ export default function MovementsPage() {
     [showDeliveries, deliveries, showPullouts, pullouts, includeSales, sales],
   );
 
-  const [deliverySheetOpen, setDeliverySheetOpen] = useState(false);
-  const [pulloutSheetOpen, setPulloutSheetOpen] = useState(false);
+  // What sheet is open, if any: logging a fresh entry, or reopening one that
+  // was tapped in the list below — the same two components cover both, see
+  // DeliverySheet's and PulloutSheet's own notes.
+  const [activeSheet, setActiveSheet] = useState<
+    | { mode: "create"; kind: "delivery" | "pullout" }
+    | {
+        mode: "edit";
+        kind: "delivery" | "pullout" | "sale";
+        entryId: Id<"deliveries"> | Id<"pullouts"> | Id<"sales">;
+      }
+    | null
+  >(null);
 
   return (
     <main className="flex-1 p-3.5 space-y-3 pb-24">
@@ -83,14 +95,14 @@ export default function MovementsPage() {
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          onClick={() => setDeliverySheetOpen(true)}
+          onClick={() => setActiveSheet({ mode: "create", kind: "delivery" })}
           className="w-full rounded-xl bg-accent py-2.5 font-semibold text-accent-ink"
         >
           + Delivery
         </button>
         <button
           type="button"
-          onClick={() => setPulloutSheetOpen(true)}
+          onClick={() => setActiveSheet({ mode: "create", kind: "pullout" })}
           className="text-danger w-full rounded-xl border border-danger py-2.5 font-semibold"
         >
           − Pull-out
@@ -133,7 +145,17 @@ export default function MovementsPage() {
         viewportH={VIEWPORT_H}
         empty={emptyMessage(typeFilter, includeSales)}
         renderRow={(entry) => (
-          <div className="flex h-full w-full items-center justify-between px-3">
+          <button
+            type="button"
+            onClick={() =>
+              setActiveSheet({
+                mode: "edit",
+                kind: entry.kind,
+                entryId: entry._id,
+              })
+            }
+            className="flex h-full w-full items-center justify-between px-3 text-left"
+          >
             <div className="min-w-0">
               <div className="truncate text-[14px] font-semibold">
                 {entry.kind === "delivery" && "Delivery"}
@@ -159,15 +181,33 @@ export default function MovementsPage() {
             >
               {signed(entry.netChange)}
             </div>
-          </div>
+          </button>
         )}
       />
 
-      {deliverySheetOpen && (
-        <DeliverySheet onClose={() => setDeliverySheetOpen(false)} />
+      {activeSheet?.mode === "create" && activeSheet.kind === "delivery" && (
+        <DeliverySheet onClose={() => setActiveSheet(null)} />
       )}
-      {pulloutSheetOpen && (
-        <PulloutSheet onClose={() => setPulloutSheetOpen(false)} />
+      {activeSheet?.mode === "create" && activeSheet.kind === "pullout" && (
+        <PulloutSheet onClose={() => setActiveSheet(null)} />
+      )}
+      {activeSheet?.mode === "edit" && activeSheet.kind === "delivery" && (
+        <DeliverySheet
+          onClose={() => setActiveSheet(null)}
+          entryId={activeSheet.entryId as Id<"deliveries">}
+        />
+      )}
+      {activeSheet?.mode === "edit" && activeSheet.kind === "pullout" && (
+        <PulloutSheet
+          onClose={() => setActiveSheet(null)}
+          entryId={activeSheet.entryId as Id<"pullouts">}
+        />
+      )}
+      {activeSheet?.mode === "edit" && activeSheet.kind === "sale" && (
+        <SaleEntrySheet
+          onClose={() => setActiveSheet(null)}
+          entryId={activeSheet.entryId as Id<"sales">}
+        />
       )}
     </main>
   );
