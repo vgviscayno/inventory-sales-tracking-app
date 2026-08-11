@@ -1,17 +1,7 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import { recordMovement } from "./stockMovements";
-
-// The fixed reason set lives here, in the args validator, rather than in the
-// schema — so widening it later is a mutation change, not a migration.
-const reasonCategory = v.union(
-  v.literal("damaged"),
-  v.literal("expired"),
-  v.literal("personal use"),
-  v.literal("given away"),
-  v.literal("other"),
-);
+import { entryLines, reasonCategory, recordMovement } from "./stockMovements";
 
 export const create = mutation({
   args: {
@@ -108,27 +98,17 @@ export const list = query({
 
     return await Promise.all(
       pullouts.map(async (pullout) => {
-        const movements = await ctx.db
+        const lines = await entryLines(ctx, pullout._id);
+        const firstMovement = await ctx.db
           .query("stockMovements")
           .withIndex("by_refId", (q) => q.eq("refId", pullout._id))
-          .collect();
-
-        const lines = await Promise.all(
-          movements.map(async (m) => {
-            const product = await ctx.db.get(m.productId);
-            return {
-              productId: m.productId,
-              productName: product?.name ?? "Deleted product",
-              quantity: m.quantity,
-            };
-          }),
-        );
+          .first();
 
         return {
           _id: pullout._id,
           createdAt: pullout.createdAt,
-          reasonCategory: movements[0]?.reasonCategory ?? "other",
-          reasonNotes: movements[0]?.reasonNotes,
+          reasonCategory: firstMovement?.reasonCategory ?? "other",
+          reasonNotes: firstMovement?.reasonNotes,
           lines,
           netChange: lines.reduce((sum, l) => sum + l.quantity, 0),
         };

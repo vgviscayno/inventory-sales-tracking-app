@@ -1,6 +1,23 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { type MutationCtx, type QueryCtx, query } from "./_generated/server";
+import {
+  type MutationCtx,
+  mutation,
+  type QueryCtx,
+  query,
+} from "./_generated/server";
+
+// The fixed reason set for a pull-out. Lives here — not in pullouts.ts — so
+// both `pullouts.create` and `stockMovements.editEntry` (which patches the
+// same field on the same rows) validate against the one set rather than two
+// that could drift apart.
+export const reasonCategory = v.union(
+  v.literal("damaged"),
+  v.literal("expired"),
+  v.literal("personal use"),
+  v.literal("given away"),
+  v.literal("other"),
+);
 
 /**
  * The sign each movement type carries. A `stockMovements` row stores `quantity`
@@ -174,6 +191,9 @@ export const listForProduct = query({
       return {
         _id: m._id,
         type: m.type,
+        // Undefined for `opening` rows, which have no header entry to open —
+        // the ledger row itself is the whole story for those.
+        refId: m.refId,
         createdAt: m.createdAt,
         netChange: m.quantity,
         runningBalance,
@@ -187,5 +207,255 @@ export const listForProduct = query({
     });
 
     return rows.reverse();
+  },
+});
+
+/**
+ * Every line a header row (delivery, pull-out, or sale) carries, each joined
+ * to the product name at the time of reading and holding the `movementId`
+ * that identifies it for an edit — the one shape `deliveries.list`,
+ * `pullouts.list`, `sales.list`, and `editEntry`'s prefill all read lines
+ * through, rather than each re-deriving it from `stockMovements` by hand.
+ */
+export async function entryLines(
+  ctx: QueryCtx,
+  refId: Id<"deliveries"> | Id<"pullouts"> | Id<"sales">,
+) {
+  const movements = await ctx.db
+    .query("stockMovements")
+    .withIndex("by_refId", (q) => q.eq("refId", refId))
+    .collect();
+
+  return await Promise.all(
+    movements.map(async (m) => {
+      const product = await ctx.db.get(m.productId);
+      return {
+        movementId: m._id,
+        productId: m.productId,
+        productName: product?.name ?? "Deleted product",
+        quantity: m.quantity,
+      };
+    }),
+  );
+}
+
+const entryRef = v.union(
+  v.object({ type: v.literal("delivery"), entryId: v.id("deliveries") }),
+  v.object({ type: v.literal("pullout"), entryId: v.id("pullouts") }),
+  v.object({ type: v.literal("sale"), entryId: v.id("sales") }),
+);
+
+/**
+ * One entry's lines and (for a pull-out) its reason — what the edit sheet
+ * prefills from when it is opened by `refId` alone, which is all a tap on a
+ * product ledger row carries. The Movements tab already holds the fuller
+ * entry object from its own list query and doesn't need this, but routing
+ * both openers through the same fetch keeps the sheet's prefill logic single
+ * rather than branching on where the tap came from.
+ */
+export const getEntry = query({
+  args: { entry: entryRef },
+  handler: async (ctx, { entry }) => {
+    const lines = await entryLines(ctx, entry.entryId);
+    const reasonRow =
+      entry.type === "pullout"
+        ? await ctx.db
+            .query("stockMovements")
+            .withIndex("by_refId", (q) => q.eq("refId", entry.entryId))
+            .first()
+        : null;
+
+    return {
+      lines,
+      reasonCategory: reasonRow?.reasonCategory,
+      reasonNotes: reasonRow?.reasonNotes,
+    };
+  },
+});
+
+/**
+ * A correction to an existing delivery or pull-out: the caller sends the
+ * *full* desired line set — some carrying the `movementId` of a row they
+ * still describe, some new — and this diffs it against what is actually on
+ * the entry today. A line whose `movementId` survives with a changed
+ * quantity is patched by the difference; one that disappears is deleted and
+ * its delta reversed; a line with no `movementId` is a fresh insert. Sale
+ * entries are rejected outright — they are edited from the Register, not
+ * here — and the negative-stock warning is the identical one `sales.create`
+ * and `pullouts.create` carry, just judged against the entry's *net* effect
+ * per product rather than line by line, since one entry can touch the same
+ * product on more than one line.
+ */
+export const editEntry = mutation({
+  args: {
+    entry: entryRef,
+    lines: v.array(
+      v.object({
+        movementId: v.optional(v.id("stockMovements")),
+        productId: v.id("products"),
+        quantity: v.number(),
+      }),
+    ),
+    reasonCategory: v.optional(reasonCategory),
+    reasonNotes: v.optional(v.string()),
+    // Same backstop as create's allowNegative: the warning is computed
+    // client-side, so this flag is the record that a human saw it and said
+    // yes. One flag for the whole edit, not one per line.
+    allowNegative: v.optional(v.boolean()),
+  },
+  handler: async (
+    ctx,
+    { entry, lines, reasonCategory, reasonNotes, allowNegative },
+  ) => {
+    if (entry.type === "sale") {
+      throw new Error("Sale entries are edited from the Register, not here");
+    }
+    if (lines.length === 0) {
+      throw new Error(
+        "An entry must keep at least one line — deleting the last one goes through deleting the entry",
+      );
+    }
+    for (const line of lines) {
+      if (line.quantity <= 0) {
+        throw new Error("Each line must have a positive quantity");
+      }
+    }
+    if (entry.type === "pullout") {
+      if (!reasonCategory) {
+        throw new Error("A pull-out needs a reason");
+      }
+      if (reasonCategory === "other" && !reasonNotes?.trim()) {
+        throw new Error('A note is required when the reason is "other"');
+      }
+    }
+
+    const existing = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_refId", (q) => q.eq("refId", entry.entryId))
+      .collect();
+    // An entry with no rows at all isn't a mismatch the check below would
+    // catch — that check is vacuously true over an empty list — so a bogus
+    // `entryId` paired with an all-new line set would otherwise sail through
+    // and silently create movements against an id nothing else points to.
+    if (existing.length === 0) {
+      throw new Error(`Entry ${entry.entryId} does not exist`);
+    }
+    // `by_refId` can only ever hold rows of one type for a given id, but this
+    // mutation is handed `entry.type` by the caller rather than trusting the
+    // rows — a mismatch here means the sheet opened the wrong kind of entry.
+    if (existing.some((m) => m.type !== entry.type)) {
+      throw new Error(`Entry ${entry.entryId} is not a ${entry.type}`);
+    }
+    const existingById = new Map(existing.map((m) => [m._id, m]));
+
+    const referencedIds = new Set<Id<"stockMovements">>();
+    for (const line of lines) {
+      if (!line.movementId) continue;
+      const movement = existingById.get(line.movementId);
+      if (!movement) {
+        throw new Error("This line no longer belongs to this entry");
+      }
+      if (movement.productId !== line.productId) {
+        throw new Error(
+          "A line's product can't change — remove it and add a new line instead",
+        );
+      }
+      referencedIds.add(line.movementId);
+    }
+
+    // Project every line's contribution to each product's net delta before
+    // writing anything, so the negative-stock check sees the whole entry —
+    // including a product touched by two lines, or a line dropped alongside
+    // one raised — the way the diff will actually leave it, not line by line.
+    const netDeltaByProduct = new Map<Id<"products">, number>();
+    const bump = (productId: Id<"products">, delta: number) =>
+      netDeltaByProduct.set(
+        productId,
+        (netDeltaByProduct.get(productId) ?? 0) + delta,
+      );
+
+    for (const line of lines) {
+      const newSigned = DIRECTION[entry.type] * line.quantity;
+      if (line.movementId) {
+        const movement = existingById.get(line.movementId);
+        if (movement) bump(line.productId, newSigned - movement.quantity);
+      } else {
+        bump(line.productId, newSigned);
+      }
+    }
+    for (const movement of existing) {
+      if (!referencedIds.has(movement._id)) {
+        bump(movement.productId, -movement.quantity);
+      }
+    }
+
+    if (!allowNegative) {
+      for (const [productId, delta] of netDeltaByProduct) {
+        const product = await ctx.db.get(productId);
+        if (!product) throw new Error("Product not found");
+        const projected = product.quantityOnHand + delta;
+        if (projected < 0) {
+          throw new Error(
+            `This edit would leave "${product.name}" at ${projected}. ` +
+              `Confirm the count is wrong and record it anyway to proceed.`,
+          );
+        }
+      }
+    }
+
+    // Dropped lines: reverse their delta and delete the row.
+    for (const movement of existing) {
+      if (referencedIds.has(movement._id)) continue;
+      const product = await ctx.db.get(movement.productId);
+      if (!product) throw new Error("Product not found");
+      await ctx.db.patch(movement.productId, {
+        quantityOnHand: product.quantityOnHand - movement.quantity,
+      });
+      await ctx.db.delete(movement._id);
+    }
+
+    // Existing lines that survive: patch the quantity (a no-op delta when
+    // unchanged) and, for a pull-out, the reason — which lives once per entry
+    // but is stored on every row, so a reason edit has to reach all of them.
+    for (const line of lines) {
+      if (!line.movementId) continue;
+      const movement = existingById.get(line.movementId);
+      if (!movement) continue;
+      const newSigned = DIRECTION[entry.type] * line.quantity;
+      const diff = newSigned - movement.quantity;
+      if (diff !== 0) {
+        const product = await ctx.db.get(line.productId);
+        if (!product) throw new Error("Product not found");
+        await ctx.db.patch(line.productId, {
+          quantityOnHand: product.quantityOnHand + diff,
+        });
+      }
+      await ctx.db.patch(movement._id, {
+        quantity: newSigned,
+        ...(entry.type === "pullout" ? { reasonCategory, reasonNotes } : {}),
+      });
+    }
+
+    // New lines: insert and move stock, same as a fresh entry.
+    for (const line of lines) {
+      if (line.movementId) continue;
+      if (entry.type === "pullout") {
+        await recordMovement(ctx, {
+          type: "pullout",
+          refId: entry.entryId,
+          productId: line.productId,
+          quantity: line.quantity,
+          reasonCategory: reasonCategory as string,
+          reasonNotes,
+        });
+      } else {
+        await recordMovement(ctx, {
+          type: "delivery",
+          refId: entry.entryId,
+          productId: line.productId,
+          quantity: line.quantity,
+        });
+      }
+    }
   },
 });
