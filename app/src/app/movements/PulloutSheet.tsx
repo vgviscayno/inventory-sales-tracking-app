@@ -52,6 +52,7 @@ export function PulloutSheet({
   const allProducts = useQuery(api.products.list, {}) ?? [];
   const createPullout = useMutation(api.pullouts.create);
   const editPullout = useMutation(api.stockMovements.editEntry);
+  const deletePullout = useMutation(api.stockMovements.deleteEntry);
   const existingEntry = useQuery(
     api.stockMovements.getEntry,
     entryId ? { entry: { type: "pullout", entryId } } : "skip",
@@ -65,8 +66,15 @@ export function PulloutSheet({
   const [error, setError] = useState<string | null>(null);
   // Whether she has been shown the below-zero warning yet, cleared whenever
   // the lines change so consent never carries over to a pull-out she has not
-  // seen — same rule the Register's `warned` follows.
+  // seen — same rule the Register's `warned` follows. Reused as the
+  // second-tap confirm when saving with every line removed, since that save
+  // is a delete said differently — see `handleSave`.
   const [warned, setWarned] = useState(false);
+  // The two-tap confirm for the standalone Delete button, independent of
+  // `warned` and of any unsaved line edits — it deletes the entry as it
+  // actually stands on the ledger.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Prefill runs once, the moment the entry loads — not on every re-render of
   // `existingEntry`, or her in-progress edits would be stomped every time the
@@ -180,11 +188,37 @@ export function PulloutSheet({
     },
   );
 
+  // What deleting the entry outright — via the Delete button — would do to
+  // each product, reckoned from the entry as it stands on the ledger rather
+  // than from any unsaved edits in `lines`: deleting discards those edits
+  // along with the entry, so it has to warn about the entry that will
+  // actually be gone.
+  const deleteNetDeltaByProduct = new Map<Id<"products">, number>();
+  for (const l of existingEntry?.lines ?? []) {
+    deleteNetDeltaByProduct.set(
+      l.productId,
+      (deleteNetDeltaByProduct.get(l.productId) ?? 0) - l.quantity,
+    );
+  }
+  const deleteOversold = [...deleteNetDeltaByProduct.entries()].flatMap(
+    ([productId, delta]) => {
+      const product = allProducts.find((p) => p._id === productId);
+      if (!product) return [];
+      const projected = product.quantityOnHand + delta;
+      return projected < 0 ? [{ productId, product, projected }] : [];
+    },
+  );
+
+  // Removing every line and saving is deleting the entry — see `handleSave` —
+  // so it needs the save button enabled at zero lines rather than disabled.
+  const isDeleteViaEmptySave = isEditing && resolvedLines.length === 0;
+
   const noteRequired = reasonCategory === "other";
   const canSave =
-    resolvedLines.length > 0 &&
-    reasonCategory !== null &&
-    (!noteRequired || reasonNotes.trim().length > 0);
+    isDeleteViaEmptySave ||
+    (resolvedLines.length > 0 &&
+      reasonCategory !== null &&
+      (!noteRequired || reasonNotes.trim().length > 0));
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -195,7 +229,34 @@ export function PulloutSheet({
   }, [onClose]);
 
   async function handleSave() {
-    if (!canSave || reasonCategory === null) return;
+    if (!canSave) return;
+
+    // Removing the last line and saving is deleting the entry said
+    // differently, so it routes through the same `deleteEntry` mutation the
+    // Delete button below calls — and gets the same two-tap confirm, folding
+    // in the negative-stock warning rather than stacking a second dialog.
+    if (isDeleteViaEmptySave && entryId) {
+      if (!warned) {
+        setWarned(true);
+        return;
+      }
+      setSaving(true);
+      setError(null);
+      try {
+        await deletePullout({
+          entry: { type: "pullout", entryId },
+          allowNegative: true,
+        });
+        onClose();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Something went wrong");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (reasonCategory === null) return;
 
     if (oversold.length > 0 && !warned) {
       setWarned(true);
@@ -236,6 +297,27 @@ export function PulloutSheet({
       setWarned(true);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!entryId) return;
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await deletePullout({
+        entry: { type: "pullout", entryId },
+        allowNegative: true,
+      });
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -392,10 +474,35 @@ export function PulloutSheet({
 
         {error && <p className="text-danger mt-2 text-sm">{error}</p>}
 
+        {/* Removing the last line and saving deletes the entry — this is
+            that confirm, folding in how many products would go negative
+            rather than stacking a second dialog on top of it. */}
+        {warned && isDeleteViaEmptySave && (
+          <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
+            <p className="font-semibold text-danger">
+              Removing the last line deletes this entry
+            </p>
+            {oversold.length > 0 && (
+              <ul className="mt-1 space-y-0.5 text-[13px]">
+                {oversold.map(({ productId, product, projected }) => (
+                  <li key={productId}>
+                    <span className="font-semibold">{product.name}</span> —
+                    currently {product.quantityOnHand}, deleting leaves{" "}
+                    {projected}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-1.5 text-sub text-[13px]">
+              Save again to confirm the delete.
+            </p>
+          </div>
+        )}
+
         {/* Only when the client's own counts show the overdraw — on the
             server-refusal path `oversold` is empty and the error above is
             the warning. */}
-        {warned && oversold.length > 0 && (
+        {warned && oversold.length > 0 && !isDeleteViaEmptySave && (
           <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
             <p className="font-semibold text-danger">
               This will take stock below zero
@@ -428,11 +535,62 @@ export function PulloutSheet({
           {saving
             ? "Saving..."
             : warned
-              ? "Record anyway"
+              ? isDeleteViaEmptySave
+                ? "Delete entry"
+                : "Record anyway"
               : isEditing
                 ? "Save Changes"
                 : "Save Pull-out"}
         </button>
+
+        {isEditing && (
+          <>
+            <div className="mt-2 flex gap-2">
+              {confirmingDelete && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(false)}
+                  disabled={deleting}
+                  className="card flex-1 py-2.5 font-semibold"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className={`flex-1 rounded-xl border py-2.5 font-semibold ${
+                  confirmingDelete
+                    ? "bg-danger border-danger text-white"
+                    : "text-danger border-line"
+                }`}
+              >
+                {deleting
+                  ? "Deleting..."
+                  : confirmingDelete
+                    ? "Confirm Delete"
+                    : "Delete Entry"}
+              </button>
+            </div>
+            {confirmingDelete && deleteOversold.length > 0 && (
+              <div className="mt-2 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
+                <p className="font-semibold text-danger">
+                  This will take stock below zero
+                </p>
+                <ul className="mt-1 space-y-0.5 text-[13px]">
+                  {deleteOversold.map(({ productId, product, projected }) => (
+                    <li key={productId}>
+                      <span className="font-semibold">{product.name}</span> —
+                      currently {product.quantityOnHand}, deleting this entry
+                      leaves {projected}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

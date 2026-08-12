@@ -459,3 +459,72 @@ export const editEntry = mutation({
     }
   },
 });
+
+/**
+ * Taking back an entry that should never have existed: every line under the
+ * header reverses its own signed delta, then the header itself goes. Sale
+ * entries are rejected outright, same as `editEntry` — they are corrected
+ * from the Register, not here. The negative-stock warning is judged the same
+ * way `editEntry`'s is — against the entry's net effect per product, since
+ * one entry can touch the same product on more than one line — except every
+ * existing movement is reversed rather than diffed against a new line set.
+ */
+export const deleteEntry = mutation({
+  args: {
+    entry: entryRef,
+    // Same backstop as editEntry's: the warning is computed client-side, so
+    // this flag is the record that a human saw it and said yes.
+    allowNegative: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { entry, allowNegative }) => {
+    if (entry.type === "sale") {
+      throw new Error("Sale entries are deleted from the Register, not here");
+    }
+
+    const existing = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_refId", (q) => q.eq("refId", entry.entryId))
+      .collect();
+    // Same guard as editEntry's: an entry with no rows at all isn't something
+    // the create mutations ever produce, but a bogus `entryId` should still
+    // be refused rather than silently deleting a header nothing points to.
+    if (existing.length === 0) {
+      throw new Error(`Entry ${entry.entryId} does not exist`);
+    }
+    if (existing.some((m) => m.type !== entry.type)) {
+      throw new Error(`Entry ${entry.entryId} is not a ${entry.type}`);
+    }
+
+    if (!allowNegative) {
+      const netDeltaByProduct = new Map<Id<"products">, number>();
+      for (const movement of existing) {
+        netDeltaByProduct.set(
+          movement.productId,
+          (netDeltaByProduct.get(movement.productId) ?? 0) - movement.quantity,
+        );
+      }
+      for (const [productId, delta] of netDeltaByProduct) {
+        const product = await ctx.db.get(productId);
+        if (!product) throw new Error("Product not found");
+        const projected = product.quantityOnHand + delta;
+        if (projected < 0) {
+          throw new Error(
+            `Deleting this entry would leave "${product.name}" at ${projected}. ` +
+              `Confirm the count is wrong and delete it anyway to proceed.`,
+          );
+        }
+      }
+    }
+
+    for (const movement of existing) {
+      const product = await ctx.db.get(movement.productId);
+      if (!product) throw new Error("Product not found");
+      await ctx.db.patch(movement.productId, {
+        quantityOnHand: product.quantityOnHand - movement.quantity,
+      });
+      await ctx.db.delete(movement._id);
+    }
+
+    await ctx.db.delete(entry.entryId);
+  },
+});
