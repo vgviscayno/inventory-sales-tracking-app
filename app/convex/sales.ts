@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import { recordMovement, saleTotal } from "./stockMovements";
+import { entryLines, recordMovement, saleTotal } from "./stockMovements";
 
 export const listForCustomer = query({
   args: { customerId: v.id("customers") },
@@ -34,22 +34,7 @@ export const list = query({
 
     return await Promise.all(
       sales.map(async (sale) => {
-        const movements = await ctx.db
-          .query("stockMovements")
-          .withIndex("by_refId", (q) => q.eq("refId", sale._id))
-          .collect();
-
-        const lines = await Promise.all(
-          movements.map(async (m) => {
-            const product = await ctx.db.get(m.productId);
-            return {
-              productId: m.productId,
-              productName: product?.name ?? "Deleted product",
-              quantity: m.quantity,
-            };
-          }),
-        );
-
+        const lines = await entryLines(ctx, sale._id);
         const customer = sale.customerId
           ? await ctx.db.get(sale.customerId)
           : null;

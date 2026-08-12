@@ -4,13 +4,30 @@
 // (search, tap to add, steppers, remove), plus the reason a delivery never
 // needs and the negative-stock warning the Register already carries (see
 // completeSale in src/app/page.tsx): warn once, one confirm, never block.
+//
+// The same component reopens an existing pull-out for correction: passing
+// `entryId` prefills its reason and lines from `getEntry` instead of starting
+// empty, and save routes through `editEntry`'s diff instead of `create`.
 
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 
-type Line = { productId: Id<"products">; quantity: number };
+// `key` is the movement's own id when this line was prefilled from an entry
+// under edit, so two lines touching the same product stay distinct rather
+// than colliding on `productId`; a freshly added line falls back to
+// `productId`, which is fine because adding an already-present product
+// merges into its existing line rather than creating a second one.
+type Line = {
+  key: string;
+  movementId?: Id<"stockMovements">;
+  productId: Id<"products">;
+  quantity: number;
+  /** The quantity this line carried when the sheet opened — undefined for a
+   * line added during this edit. */
+  originalQuantity?: number;
+};
 
 const REASONS = [
   { value: "damaged", label: "Damaged" },
@@ -22,9 +39,23 @@ const REASONS = [
 
 type Reason = (typeof REASONS)[number]["value"];
 
-export function PulloutSheet({ onClose }: { onClose: () => void }) {
+export function PulloutSheet({
+  onClose,
+  entryId,
+  focusProductId,
+}: {
+  onClose: () => void;
+  entryId?: Id<"pullouts">;
+  focusProductId?: Id<"products">;
+}) {
+  const isEditing = entryId !== undefined;
   const allProducts = useQuery(api.products.list, {}) ?? [];
   const createPullout = useMutation(api.pullouts.create);
+  const editPullout = useMutation(api.stockMovements.editEntry);
+  const existingEntry = useQuery(
+    api.stockMovements.getEntry,
+    entryId ? { entry: { type: "pullout", entryId } } : "skip",
+  );
 
   const [search, setSearch] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
@@ -36,6 +67,30 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
   // the lines change so consent never carries over to a pull-out she has not
   // seen — same rule the Register's `warned` follows.
   const [warned, setWarned] = useState(false);
+
+  // Prefill runs once, the moment the entry loads — not on every re-render of
+  // `existingEntry`, or her in-progress edits would be stomped every time the
+  // query refreshes.
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (!isEditing || prefilled.current || existingEntry === undefined) {
+      return;
+    }
+    prefilled.current = true;
+    setLines(
+      existingEntry.lines.map((l) => ({
+        key: l.movementId,
+        movementId: l.movementId,
+        productId: l.productId,
+        quantity: Math.abs(l.quantity),
+        originalQuantity: Math.abs(l.quantity),
+      })),
+    );
+    if (existingEntry.reasonCategory) {
+      setReasonCategory(existingEntry.reasonCategory as Reason);
+    }
+    setReasonNotes(existingEntry.reasonNotes ?? "");
+  }, [isEditing, existingEntry]);
 
   const matches = search.trim()
     ? allProducts.filter((p) =>
@@ -52,32 +107,30 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
           l.productId === productId ? { ...l, quantity: l.quantity + 1 } : l,
         );
       }
-      return [...prev, { productId, quantity: 1 }];
+      return [...prev, { key: productId, productId, quantity: 1 }];
     });
     setSearch("");
   }
 
-  function bump(productId: Id<"products">, by: number) {
+  function bump(key: string, by: number) {
     setWarned(false);
     setLines((prev) =>
       prev.map((l) =>
-        l.productId === productId
-          ? { ...l, quantity: Math.max(1, l.quantity + by) }
-          : l,
+        l.key === key ? { ...l, quantity: Math.max(1, l.quantity + by) } : l,
       ),
     );
   }
 
-  function setQuantity(productId: Id<"products">, quantity: number) {
+  function setQuantity(key: string, quantity: number) {
     setWarned(false);
     setLines((prev) =>
-      prev.map((l) => (l.productId === productId ? { ...l, quantity } : l)),
+      prev.map((l) => (l.key === key ? { ...l, quantity } : l)),
     );
   }
 
-  function removeLine(productId: Id<"products">) {
+  function removeLine(key: string) {
     setWarned(false);
-    setLines((prev) => prev.filter((l) => l.productId !== productId));
+    setLines((prev) => prev.filter((l) => l.key !== key));
   }
 
   // Each line joined to the product as it stands right now, dropping any line
@@ -87,10 +140,44 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
     return product ? [{ ...line, product }] : [];
   });
 
-  // Lines this pull-out would drive below zero. They warn — they never
-  // block, identically to the Register.
-  const oversold = resolvedLines.filter(
-    (l) => l.quantity > l.product.quantityOnHand,
+  // Net delta per product this save would cause, relative to what's already
+  // on the ledger — zero for every line while logging a fresh pull-out, since
+  // every line there is new. Editing is what can turn a raised or added line
+  // into a bigger loss of stock than the count already reflects, so this is
+  // what the warning below is judged against, not the raw quantity typed.
+  const netDeltaByProduct = new Map<Id<"products">, number>();
+  const bumpNetDelta = (productId: Id<"products">, delta: number) =>
+    netDeltaByProduct.set(
+      productId,
+      (netDeltaByProduct.get(productId) ?? 0) + delta,
+    );
+
+  for (const line of resolvedLines) {
+    bumpNetDelta(
+      line.productId,
+      -(line.quantity - (line.originalQuantity ?? 0)),
+    );
+  }
+  if (existingEntry) {
+    const stillPresent = new Set(
+      lines.flatMap((l) => (l.movementId ? [l.movementId] : [])),
+    );
+    for (const original of existingEntry.lines) {
+      if (!stillPresent.has(original.movementId)) {
+        // A dropped line reverses its own delta; it was already negative
+        // (pullout), so reversing it adds stock back.
+        bumpNetDelta(original.productId, -original.quantity);
+      }
+    }
+  }
+
+  const oversold = [...netDeltaByProduct.entries()].flatMap(
+    ([productId, delta]) => {
+      const product = allProducts.find((p) => p._id === productId);
+      if (!product) return [];
+      const projected = product.quantityOnHand + delta;
+      return projected < 0 ? [{ productId, product, projected }] : [];
+    },
   );
 
   const noteRequired = reasonCategory === "other";
@@ -118,15 +205,29 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      await createPullout({
-        lines: resolvedLines.map((l) => ({
-          productId: l.productId,
-          quantity: l.quantity,
-        })),
-        reasonCategory,
-        reasonNotes: reasonNotes.trim() || undefined,
-        allowNegative: warned,
-      });
+      if (isEditing && entryId) {
+        await editPullout({
+          entry: { type: "pullout", entryId },
+          lines: resolvedLines.map((l) => ({
+            movementId: l.movementId,
+            productId: l.productId,
+            quantity: l.quantity,
+          })),
+          reasonCategory,
+          reasonNotes: reasonNotes.trim() || undefined,
+          allowNegative: warned,
+        });
+      } else {
+        await createPullout({
+          lines: resolvedLines.map((l) => ({
+            productId: l.productId,
+            quantity: l.quantity,
+          })),
+          reasonCategory,
+          reasonNotes: reasonNotes.trim() || undefined,
+          allowNegative: warned,
+        });
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -149,7 +250,9 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-line" />
-        <h3 className="mb-2.5 font-semibold">Log a pull-out</h3>
+        <h3 className="mb-2.5 font-semibold">
+          {isEditing ? "Edit pull-out" : "Log a pull-out"}
+        </h3>
 
         <div className="grid grid-cols-3 gap-1.5">
           {REASONS.map((r) => (
@@ -214,53 +317,72 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
         )}
 
         <div className="mt-3 space-y-2">
-          {resolvedLines.map((l) => (
-            <div key={l.productId} className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0 truncate">{l.product.name}</div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => bump(l.productId, -1)}
-                    className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    value={l.quantity}
-                    onChange={(e) =>
-                      setQuantity(
-                        l.productId,
-                        Math.max(1, Number(e.target.value)),
-                      )
-                    }
-                    className="w-14 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => bump(l.productId, 1)}
-                    className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
-                  >
-                    +
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeLine(l.productId)}
-                    className="text-danger px-1 text-lg leading-none"
-                    aria-label={`Remove ${l.product.name}`}
-                  >
-                    ×
-                  </button>
+          {resolvedLines.map((l) => {
+            const isFocused =
+              focusProductId !== undefined && l.productId === focusProductId;
+            const isOther = focusProductId !== undefined && !isFocused;
+            return (
+              <div
+                key={l.key}
+                className={`space-y-1 rounded-lg p-1.5 ${
+                  isFocused ? "bg-accent/10" : ""
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <div className="min-w-0 truncate">{l.product.name}</div>
+                    {isOther && (
+                      <span className="text-sub shrink-0 text-[11px]">
+                        also in this entry
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => bump(l.key, -1)}
+                      className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      value={l.quantity}
+                      onChange={(e) =>
+                        setQuantity(l.key, Math.max(1, Number(e.target.value)))
+                      }
+                      className="w-14 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => bump(l.key, 1)}
+                      className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeLine(l.key)}
+                      className="text-danger px-1 text-lg leading-none"
+                      aria-label={`Remove ${l.product.name}`}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
+                {/* This per-line hint compares against the live count, which
+                    already has this line's *original* quantity baked in
+                    while editing — the entry-wide warning below is what
+                    judges the net effect correctly, so this stays
+                    create-only. */}
+                {!isEditing && l.quantity > l.product.quantityOnHand && (
+                  <div className="text-danger text-xs">
+                    Only {l.product.quantityOnHand} on hand
+                  </div>
+                )}
               </div>
-              {l.quantity > l.product.quantityOnHand && (
-                <div className="text-danger text-xs">
-                  Only {l.product.quantityOnHand} on hand
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
           {resolvedLines.length === 0 && (
             <p className="text-sub py-4 text-center text-[13px]">
               Search above and tap a product to add it to this pull-out
@@ -279,17 +401,18 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
               This will take stock below zero
             </p>
             <ul className="mt-1 space-y-0.5 text-[13px]">
-              {oversold.map((l) => (
-                <li key={l.productId}>
-                  <span className="font-semibold">{l.product.name}</span> — only{" "}
-                  {l.product.quantityOnHand} on hand, pulling {l.quantity}{" "}
-                  (leaves {l.product.quantityOnHand - l.quantity})
+              {oversold.map(({ productId, product, projected }) => (
+                <li key={productId}>
+                  <span className="font-semibold">{product.name}</span> —
+                  currently {product.quantityOnHand}, this{" "}
+                  {isEditing ? "edit" : "pull-out"} leaves {projected}
                 </li>
               ))}
             </ul>
             <p className="mt-1.5 text-sub text-[13px]">
-              Record the pull-out anyway — the count is what needs fixing, not
-              the pull-out. Recount these after.
+              Record the {isEditing ? "edit" : "pull-out"} anyway — the count is
+              what needs fixing, not the {isEditing ? "edit" : "pull-out"}.
+              Recount these after.
             </p>
           </div>
         )}
@@ -305,8 +428,10 @@ export function PulloutSheet({ onClose }: { onClose: () => void }) {
           {saving
             ? "Saving..."
             : warned
-              ? "Record pull-out anyway"
-              : "Save Pull-out"}
+              ? "Record anyway"
+              : isEditing
+                ? "Save Changes"
+                : "Save Pull-out"}
         </button>
       </div>
     </div>

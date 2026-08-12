@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { recordMovement } from "./stockMovements";
+import { entryLines, recordMovement } from "./stockMovements";
 
 export const create = mutation({
   args: {
@@ -79,22 +79,7 @@ export const list = query({
 
     return await Promise.all(
       deliveries.map(async (delivery) => {
-        const movements = await ctx.db
-          .query("stockMovements")
-          .withIndex("by_refId", (q) => q.eq("refId", delivery._id))
-          .collect();
-
-        const lines = await Promise.all(
-          movements.map(async (m) => {
-            const product = await ctx.db.get(m.productId);
-            return {
-              productId: m.productId,
-              productName: product?.name ?? "Deleted product",
-              quantity: m.quantity,
-            };
-          }),
-        );
-
+        const lines = await entryLines(ctx, delivery._id);
         return {
           _id: delivery._id,
           createdAt: delivery.createdAt,

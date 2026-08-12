@@ -8,6 +8,9 @@ import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { formatTime, signed } from "../../format";
+import { DeliverySheet } from "../../movements/DeliverySheet";
+import { PulloutSheet } from "../../movements/PulloutSheet";
+import { SaleEntrySheet } from "../../movements/SaleEntrySheet";
 import { StockStatusPill } from "../../StockStatusPill";
 import { WindowedDayList } from "../../WindowedDayList";
 
@@ -58,6 +61,14 @@ function ProductForm({ product }: { product: Product }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Which entry a ledger row tap opened, if any — opening rows have no
+  // `refId` and so never set this.
+  const [openEntry, setOpenEntry] = useState<
+    | { kind: "delivery"; entryId: Id<"deliveries"> }
+    | { kind: "pullout"; entryId: Id<"pullouts"> }
+    | { kind: "sale"; entryId: Id<"sales"> }
+    | null
+  >(null);
 
   const canSave = name.trim() && Number(sellingPrice) > 0;
 
@@ -189,18 +200,54 @@ function ProductForm({ product }: { product: Product }) {
         </button>
       </div>
 
-      <ProductLedger productId={product._id} />
+      <ProductLedger productId={product._id} onOpenEntry={setOpenEntry} />
+
+      {openEntry?.kind === "delivery" && (
+        <DeliverySheet
+          onClose={() => setOpenEntry(null)}
+          entryId={openEntry.entryId}
+          focusProductId={product._id}
+        />
+      )}
+      {openEntry?.kind === "pullout" && (
+        <PulloutSheet
+          onClose={() => setOpenEntry(null)}
+          entryId={openEntry.entryId}
+          focusProductId={product._id}
+        />
+      )}
+      {openEntry?.kind === "sale" && (
+        <SaleEntrySheet
+          onClose={() => setOpenEntry(null)}
+          entryId={openEntry.entryId}
+          focusProductId={product._id}
+        />
+      )}
     </main>
   );
 }
+
+type OpenEntry =
+  | { kind: "delivery"; entryId: Id<"deliveries"> }
+  | { kind: "pullout"; entryId: Id<"pullouts"> }
+  | { kind: "sale"; entryId: Id<"sales"> };
 
 /**
  * Every `stockMovements` row for this product, newest first under day
  * headings — the answer to "why does it say N?" sitting directly under N.
  * Reuses the Movements tab's day-grouped windowed list so a year of history
- * renders as cheaply here as it does there.
+ * renders as cheaply here as it does there. A row that names a header entry
+ * (anything but `opening`, which stands alone with no entry to open) is
+ * tappable, and reopens that whole entry rather than just this one line —
+ * an entry the ledger holds two rows for is still one correction to make.
  */
-function ProductLedger({ productId }: { productId: Id<"products"> }) {
+function ProductLedger({
+  productId,
+  onOpenEntry,
+}: {
+  productId: Id<"products">;
+  onOpenEntry: (entry: OpenEntry) => void;
+}) {
   const rows = useQuery(api.stockMovements.listForProduct, { productId });
 
   return (
@@ -214,10 +261,38 @@ function ProductLedger({ productId }: { productId: Id<"products"> }) {
         rowH={LEDGER_ROW_H}
         viewportH={LEDGER_VIEWPORT_H}
         empty={rows === undefined ? "Loading…" : "No movements yet"}
-        renderRow={(row) => <LedgerRowView row={row} />}
+        renderRow={(row) => (
+          <LedgerRowView row={row} onOpen={openEntryFor(row, onOpenEntry)} />
+        )}
       />
     </div>
   );
+}
+
+/**
+ * The tap handler for one ledger row, or `undefined` for a row with no entry
+ * to open — an `opening` row, which stands alone. `row.refId`'s declared type
+ * spans all three header tables regardless of `row.type`; narrowing it to the
+ * one table `type` actually names is a cast rather than something the schema
+ * ties together, since `stockMovements`' `type` and `refId` fields are
+ * validated independently (see schema.ts).
+ */
+function openEntryFor(
+  row: LedgerRow,
+  onOpenEntry: (entry: OpenEntry) => void,
+): (() => void) | undefined {
+  if (row.type === "opening" || row.refId === undefined) return undefined;
+  const refId = row.refId;
+  switch (row.type) {
+    case "delivery":
+      return () =>
+        onOpenEntry({ kind: "delivery", entryId: refId as Id<"deliveries"> });
+    case "pullout":
+      return () =>
+        onOpenEntry({ kind: "pullout", entryId: refId as Id<"pullouts"> });
+    case "sale":
+      return () => onOpenEntry({ kind: "sale", entryId: refId as Id<"sales"> });
+  }
 }
 
 function ledgerContext(row: LedgerRow): string | null {
@@ -236,7 +311,13 @@ function ledgerContext(row: LedgerRow): string | null {
   return null;
 }
 
-function LedgerRowView({ row }: { row: LedgerRow }) {
+function LedgerRowView({
+  row,
+  onOpen,
+}: {
+  row: LedgerRow;
+  onOpen?: () => void;
+}) {
   const context = ledgerContext(row);
   const changeColor =
     row.netChange > 0
@@ -245,8 +326,8 @@ function LedgerRowView({ row }: { row: LedgerRow }) {
         ? "text-danger"
         : "text-sub";
 
-  return (
-    <div className="flex h-full w-full items-center justify-between px-3">
+  const content = (
+    <>
       <div className="min-w-0">
         <div className="truncate text-[14px] font-semibold">
           {LEDGER_LABEL[row.type]}
@@ -262,6 +343,24 @@ function LedgerRowView({ row }: { row: LedgerRow }) {
         </div>
         <div className="text-sub text-[11px]">→ {row.runningBalance}</div>
       </div>
-    </div>
+    </>
+  );
+
+  if (!onOpen) {
+    return (
+      <div className="flex h-full w-full items-center justify-between px-3">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex h-full w-full items-center justify-between px-3 text-left"
+    >
+      {content}
+    </button>
   );
 }
