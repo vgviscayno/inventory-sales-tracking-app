@@ -7,6 +7,13 @@ export default defineSchema({
     sellingPrice: v.number(),
     quantityOnHand: v.number(),
     lowStockThreshold: v.optional(v.number()),
+    // Uniform two-state lifecycle, absent meaning active. Only `archivedAt`
+    // is exercised in this ticket — `deletedAt` lands with it as one schema
+    // edit so soft-delete (the next ticket) doesn't need a second migration.
+    // No index: every handler here already collects the whole table and
+    // filters in JS (see lifecycle.ts), and at ~100 SKUs that's noise.
+    archivedAt: v.optional(v.number()),
+    deletedAt: v.optional(v.number()),
   }),
 
   customers: defineTable({

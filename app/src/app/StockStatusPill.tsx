@@ -10,7 +10,9 @@ export function StockStatusPill({
   status,
   className = "",
 }: {
-  status: StockStatus;
+  // Undefined for an archived product — `products.ts`'s `withStatus` omits
+  // the field there rather than computing a status nobody should read.
+  status: StockStatus | undefined;
   className?: string;
 }) {
   if (status === "negative") {

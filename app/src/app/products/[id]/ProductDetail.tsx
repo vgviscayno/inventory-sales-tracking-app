@@ -3,7 +3,6 @@
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -48,8 +47,8 @@ export function ProductDetail({ productId }: { productId: Id<"products"> }) {
 
 function ProductForm({ product }: { product: Product }) {
   const updateProduct = useMutation(api.products.update);
-  const removeProduct = useMutation(api.products.remove);
-  const router = useRouter();
+  const archiveProduct = useMutation(api.products.archive);
+  const unarchiveProduct = useMutation(api.products.unarchive);
 
   const [name, setName] = useState(product.name);
   const [sellingPrice, setSellingPrice] = useState(
@@ -59,8 +58,12 @@ function ProductForm({ product }: { product: Product }) {
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "",
   );
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  // Only reached when the product still holds stock — see `handleArchive`.
+  // Archiving is never blocked, so this exists purely so she sees the count
+  // before it happens, not to gate the action itself.
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
+  const isArchived = product.archivedAt != null;
   // Which entry a ledger row tap opened, if any — opening rows have no
   // `refId` and so never set this.
   const [openEntry, setOpenEntry] = useState<
@@ -85,14 +88,25 @@ function ProductForm({ product }: { product: Product }) {
     setSaving(false);
   }
 
-  async function handleDelete() {
-    if (!confirmingDelete) {
-      setConfirmingDelete(true);
+  // Only a product still holding stock needs a look before archiving — one
+  // with nothing on hand has nothing to warn about, so it archives on the
+  // first tap. Archiving itself is never refused either way; the confirm
+  // exists only so she sees the count before it disappears from the grid.
+  async function handleArchive() {
+    if (product.quantityOnHand !== 0 && !confirmingArchive) {
+      setConfirmingArchive(true);
       return;
     }
-    setDeleting(true);
-    await removeProduct({ id: product._id });
-    router.push("/products");
+    setArchiving(true);
+    await archiveProduct({ id: product._id });
+    setArchiving(false);
+    setConfirmingArchive(false);
+  }
+
+  async function handleUnarchive() {
+    setArchiving(true);
+    await unarchiveProduct({ id: product._id });
+    setArchiving(false);
   }
 
   return (
@@ -158,10 +172,14 @@ function ProductForm({ product }: { product: Product }) {
             className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
           />
         </div>
-        <StockStatusPill
-          status={product.lowStockStatus}
-          className="inline-block"
-        />
+        {isArchived ? (
+          <span className="pill archived inline-block">Archived</span>
+        ) : (
+          <StockStatusPill
+            status={product.lowStockStatus}
+            className="inline-block"
+          />
+        )}
         <button
           type="submit"
           disabled={saving || !canSave}
@@ -171,34 +189,45 @@ function ProductForm({ product }: { product: Product }) {
         </button>
       </form>
 
-      <div className="flex gap-2">
-        {confirmingDelete && (
-          <button
-            type="button"
-            onClick={() => setConfirmingDelete(false)}
-            disabled={deleting}
-            className="card flex-1 py-2.5 font-semibold"
-          >
-            Cancel
-          </button>
-        )}
+      {isArchived ? (
         <button
           type="button"
-          onClick={handleDelete}
-          disabled={deleting}
-          className={`flex-1 rounded-xl border py-2.5 font-semibold ${
-            confirmingDelete
-              ? "bg-danger border-danger text-white"
-              : "text-danger border-line"
-          }`}
+          onClick={handleUnarchive}
+          disabled={archiving}
+          className="w-full rounded-xl border border-line py-2.5 font-semibold"
         >
-          {deleting
-            ? "Deleting..."
-            : confirmingDelete
-              ? "Confirm Delete"
-              : "Delete Product"}
+          {archiving ? "Unarchiving..." : "Unarchive Product"}
         </button>
-      </div>
+      ) : (
+        <div className="flex gap-2">
+          {confirmingArchive && (
+            <button
+              type="button"
+              onClick={() => setConfirmingArchive(false)}
+              disabled={archiving}
+              className="card flex-1 py-2.5 font-semibold"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleArchive}
+            disabled={archiving}
+            className={`flex-1 rounded-xl border py-2.5 font-semibold ${
+              confirmingArchive
+                ? "bg-danger border-danger text-white"
+                : "text-danger border-line"
+            }`}
+          >
+            {archiving
+              ? "Archiving..."
+              : confirmingArchive
+                ? `Confirm Archive (${product.quantityOnHand} in stock)`
+                : "Archive Product"}
+          </button>
+        </div>
+      )}
 
       <ProductLedger productId={product._id} onOpenEntry={setOpenEntry} />
 

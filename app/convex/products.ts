@@ -1,15 +1,28 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { filterLifecycle } from "./lifecycle";
 
 const DEFAULT_THRESHOLD = 10;
 
+/**
+ * An archived product is never nagging her about restocking it — she's
+ * decided she isn't restocking it, that's what archiving means — so it
+ * carries no low-stock status at all rather than a status nobody reads.
+ * Negative first among the active cases, and it has to stay first: a
+ * negative count is also `<= threshold`, so the low case would swallow it and
+ * render "order more" over what is really "this count is wrong, recount".
+ */
 function withStatus<
-  T extends { quantityOnHand: number; lowStockThreshold?: number },
+  T extends {
+    quantityOnHand: number;
+    lowStockThreshold?: number;
+    archivedAt?: number;
+  },
 >(product: T, globalThreshold: number) {
+  if (product.archivedAt !== undefined) {
+    return { ...product, lowStockStatus: undefined };
+  }
   const threshold = product.lowStockThreshold ?? globalThreshold;
-  // Negative first, and it has to stay first: a negative count is also
-  // `<= threshold`, so the low case would swallow it and render "order more"
-  // over what is really "this count is wrong, recount".
   const lowStockStatus =
     product.quantityOnHand < 0
       ? ("negative" as const)
@@ -20,15 +33,26 @@ function withStatus<
 }
 
 export const list = query({
-  args: { search: v.optional(v.string()) },
-  handler: async (ctx, { search }) => {
+  args: {
+    search: v.optional(v.string()),
+    // Every caller that doesn't ask otherwise gets active products only — a
+    // picker, the Register grid, the Products list's main section. Only the
+    // collapsed Archived section asks for `"withArchived"`.
+    include: v.optional(
+      v.union(v.literal("active"), v.literal("withArchived")),
+    ),
+  },
+  handler: async (ctx, { search, include }) => {
     const settings = await ctx.db.query("appSettings").first();
     const globalThreshold = settings?.lowStockThreshold ?? DEFAULT_THRESHOLD;
 
     const all = await ctx.db.query("products").collect();
+    const lifecycleFiltered = filterLifecycle(all, include ?? "active");
     const filtered = search
-      ? all.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
-      : all;
+      ? lifecycleFiltered.filter((p) =>
+          p.name.toLowerCase().includes(search.toLowerCase()),
+        )
+      : lifecycleFiltered;
 
     return filtered
       .map((p) => withStatus(p, globalThreshold))
@@ -95,5 +119,32 @@ export const remove = mutation({
   args: { id: v.id("products") },
   handler: async (ctx, { id }) => {
     await ctx.db.delete(id);
+  },
+});
+
+/**
+ * Archive is reversible, so it is never gated — no stock check, no
+ * `allowNegative`-style confirm flag. Whether to warn her that the product
+ * still holds stock is judged client-side, from the count `products.get`
+ * already gives her; this mutation just does the one thing archiving means:
+ * it stops the product from being selectable. `quantityOnHand` and every
+ * `stockMovements` row are untouched — archive changes visibility, never
+ * arithmetic.
+ */
+export const archive = mutation({
+  args: { id: v.id("products") },
+  handler: async (ctx, { id }) => {
+    await ctx.db.patch(id, { archivedAt: Date.now() });
+  },
+});
+
+/**
+ * The one-tap reversal — no confirm, because gating the reversible action is
+ * exactly the mistake the two-state model exists to avoid.
+ */
+export const unarchive = mutation({
+  args: { id: v.id("products") },
+  handler: async (ctx, { id }) => {
+    await ctx.db.patch(id, { archivedAt: undefined });
   },
 });
