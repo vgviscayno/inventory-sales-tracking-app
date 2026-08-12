@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 import { api } from "./_generated/api";
-import { aProductHolding, setupTest } from "./test.helpers";
+import {
+  aProductHolding,
+  expectCacheMatchesLedger,
+  setupTest,
+} from "./test.helpers";
 
 test("a product created through the mutation reads back through the query", async () => {
   const t = setupTest();
@@ -78,4 +82,54 @@ test("a negative count reads as negative, not merely low", async () => {
   expect(await t.query(api.products.list, {})).toMatchObject([
     { lowStockStatus: "negative" },
   ]);
+});
+
+test("archiving a product removes it from the default list but leaves get and withArchived able to find it", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 12, { name: "Seasonal Umbrella" });
+
+  await t.mutation(api.products.archive, { id });
+
+  expect(await t.query(api.products.list, {})).toEqual([]);
+  expect(
+    await t.query(api.products.list, { include: "withArchived" }),
+  ).toMatchObject([{ _id: id, name: "Seasonal Umbrella" }]);
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    name: "Seasonal Umbrella",
+    archivedAt: expect.any(Number),
+  });
+});
+
+test("archiving a product with stock is never blocked, and touches neither the cache nor the ledger", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 12);
+
+  await expect(t.mutation(api.products.archive, { id })).resolves.not.toThrow();
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    quantityOnHand: 12,
+  });
+  await expectCacheMatchesLedger(t, id);
+});
+
+test("an archived product carries no low-stock status, even when its count is under threshold", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 2);
+
+  await t.mutation(api.products.archive, { id });
+
+  expect((await t.query(api.products.get, { id }))?.lowStockStatus).toBe(
+    undefined,
+  );
+});
+
+test("unarchiving a product brings it back into the default list and clears archivedAt", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 12);
+  await t.mutation(api.products.archive, { id });
+
+  await t.mutation(api.products.unarchive, { id });
+
+  expect((await t.query(api.products.get, { id }))?.archivedAt).toBe(undefined);
+  expect(await t.query(api.products.list, {})).toMatchObject([{ _id: id }]);
 });

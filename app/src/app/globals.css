@@ -66,3 +66,7 @@ body {
   background: var(--accent);
   color: var(--accent-ink);
 }
+.pill.archived {
+  background: var(--line);
+  color: var(--sub);
+}

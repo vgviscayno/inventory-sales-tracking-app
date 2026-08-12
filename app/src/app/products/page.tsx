@@ -4,12 +4,21 @@ import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
+import { ArchivedSection } from "../ArchivedSection";
 import { StockStatusPill } from "../StockStatusPill";
 
 export default function ProductsPage() {
   const [search, setSearch] = useState("");
-  const products =
-    useQuery(api.products.list, { search: search || undefined }) ?? [];
+  // One query covering both sections — `include: "withArchived"` — split
+  // client-side into active and archived, rather than a second `list` call
+  // for the collapsed section that would re-run the same server-side scan.
+  const allProducts =
+    useQuery(api.products.list, {
+      search: search || undefined,
+      include: "withArchived",
+    }) ?? [];
+  const products = allProducts.filter((p) => p.archivedAt == null);
+  const archivedProducts = allProducts.filter((p) => p.archivedAt != null);
   const createProduct = useMutation(api.products.create);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -148,6 +157,19 @@ export default function ProductsPage() {
           <p className="text-sub text-center py-8">No products found</p>
         )}
       </div>
+
+      <ArchivedSection count={archivedProducts.length}>
+        {archivedProducts.map((p) => (
+          <Link
+            key={p._id}
+            href={`/products/${p._id}`}
+            className="card flex items-center justify-between px-3 py-3 opacity-70"
+          >
+            <div className="font-semibold">{p.name}</div>
+            <span className="pill archived">Archived</span>
+          </Link>
+        ))}
+      </ArchivedSection>
     </main>
   );
 }

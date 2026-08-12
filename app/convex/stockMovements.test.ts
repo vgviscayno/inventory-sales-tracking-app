@@ -7,6 +7,26 @@ import {
   setupTest,
 } from "./test.helpers";
 
+test("an archived product's name still renders on its own ledger and on past delivery lines", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20, { name: "Coke 1.5L" });
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
+  });
+
+  await t.mutation(api.products.archive, { id: coke });
+
+  const deliveries = await t.query(api.deliveries.list, {});
+  expect(deliveries.find((d) => d._id === deliveryId)?.lines).toMatchObject([
+    { productName: "Coke 1.5L" },
+  ]);
+
+  const ledger = await t.query(api.stockMovements.listForProduct, {
+    productId: coke,
+  });
+  expect(ledger.length).toBeGreaterThan(0);
+});
+
 test("the opening row is the oldest row, and the newest row's running balance equals quantityOnHand", async () => {
   const t = setupTest();
   const coke = await aProductHolding(t, 20);
