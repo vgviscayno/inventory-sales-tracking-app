@@ -440,3 +440,148 @@ test("the cache tracks the ledger through an edit that both adds and drops lines
   await expectCacheMatchesLedger(t, pancit);
   await expectCacheMatchesLedger(t, noodles);
 });
+
+test("deleteEntry reverses a delivery's lines and removes the header", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const pancit = await aProductHolding(t, 10, {
+    name: "Lucky Me Pancit Canton",
+  });
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: coke, quantity: 5 },
+      { kind: "existing", productId: pancit, quantity: 4 },
+    ],
+  });
+
+  await t.mutation(api.stockMovements.deleteEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+  });
+
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    quantityOnHand: 20,
+  });
+  expect(await t.query(api.products.get, { id: pancit })).toMatchObject({
+    quantityOnHand: 10,
+  });
+  expect(
+    (await t.query(api.deliveries.list, {})).find((e) => e._id === deliveryId),
+  ).toBeUndefined();
+  await expectCacheMatchesLedger(t, coke);
+  await expectCacheMatchesLedger(t, pancit);
+});
+
+test("deleteEntry reverses a pull-out's lines and removes the header", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [{ productId: coke, quantity: 5 }],
+    reasonCategory: "damaged",
+  });
+
+  await t.mutation(api.stockMovements.deleteEntry, {
+    entry: { type: "pullout", entryId: pulloutId },
+  });
+
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    quantityOnHand: 20,
+  });
+  expect(
+    (await t.query(api.pullouts.list, {})).find((e) => e._id === pulloutId),
+  ).toBeUndefined();
+  await expectCacheMatchesLedger(t, coke);
+});
+
+test("deleteEntry rejects a sale entry — those are deleted from the Register", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+
+  const saleId = await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: coke, quantity: 3 }],
+  });
+
+  await expect(
+    t.mutation(api.stockMovements.deleteEntry, {
+      entry: { type: "sale", entryId: saleId },
+    }),
+  ).rejects.toThrow(/Register/);
+  await expectCacheMatchesLedger(t, coke);
+});
+
+test("deleteEntry rejects an entry with no existing rows", async () => {
+  const t = setupTest();
+
+  const orphanDeliveryId = await t.run(
+    async (ctx) => await ctx.db.insert("deliveries", { createdAt: Date.now() }),
+  );
+
+  await expect(
+    t.mutation(api.stockMovements.deleteEntry, {
+      entry: { type: "delivery", entryId: orphanDeliveryId },
+    }),
+  ).rejects.toThrow(/does not exist/);
+});
+
+test("deleteEntry judges the negative-stock warning on the entry's net effect across two lines for the same product", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 5, { name: "Coke 1.5L" });
+
+  // A delivery of 10, then a pull-out of 10 that used part of it — coke sits
+  // at 5. Deleting the delivery reverses +10, which would take coke to -5
+  // once the pull-out's -10 is still on the ledger.
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 10 }],
+  });
+  await t.mutation(api.pullouts.create, {
+    lines: [{ productId: coke, quantity: 10 }],
+    reasonCategory: "damaged",
+    allowNegative: true,
+  });
+
+  await expect(
+    t.mutation(api.stockMovements.deleteEntry, {
+      entry: { type: "delivery", entryId: deliveryId },
+    }),
+  ).rejects.toThrow(/Coke 1\.5L/);
+
+  await t.mutation(api.stockMovements.deleteEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+    allowNegative: true,
+  });
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    quantityOnHand: -5,
+  });
+  await expectCacheMatchesLedger(t, coke);
+});
+
+test("deleteEntry cascades every line's own delta, not just the first product touched", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 5, { name: "Coke 1.5L" });
+  const pancit = await aProductHolding(t, 5, {
+    name: "Lucky Me Pancit Canton",
+  });
+
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [
+      { productId: coke, quantity: 5 },
+      { productId: pancit, quantity: 5 },
+    ],
+    reasonCategory: "damaged",
+  });
+
+  await t.mutation(api.stockMovements.deleteEntry, {
+    entry: { type: "pullout", entryId: pulloutId },
+  });
+
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    quantityOnHand: 5,
+  });
+  expect(await t.query(api.products.get, { id: pancit })).toMatchObject({
+    quantityOnHand: 5,
+  });
+  await expectCacheMatchesLedger(t, coke);
+  await expectCacheMatchesLedger(t, pancit);
+});
