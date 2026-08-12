@@ -3,6 +3,7 @@
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -46,9 +47,11 @@ export function ProductDetail({ productId }: { productId: Id<"products"> }) {
 }
 
 function ProductForm({ product }: { product: Product }) {
+  const router = useRouter();
   const updateProduct = useMutation(api.products.update);
   const archiveProduct = useMutation(api.products.archive);
   const unarchiveProduct = useMutation(api.products.unarchive);
+  const deleteProduct = useMutation(api.products.remove);
 
   const [name, setName] = useState(product.name);
   const [sellingPrice, setSellingPrice] = useState(
@@ -63,7 +66,19 @@ function ProductForm({ product }: { product: Product }) {
   // Archiving is never blocked, so this exists purely so she sees the count
   // before it happens, not to gate the action itself.
   const [confirmingArchive, setConfirmingArchive] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Delete is one-way, so it gets the same two-tap confirm as archive does —
+  // even though the button is already disabled until the count is zero.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isArchived = product.archivedAt != null;
+  // Mirrors the server's gate (see `products.remove`) so what the button
+  // shows and what it's actually allowed to do never disagree.
+  const deleteBlockedReason =
+    product.quantityOnHand === 0
+      ? null
+      : product.quantityOnHand > 0
+        ? `${product.quantityOnHand} still on hand — pull them out first`
+        : `${product.quantityOnHand} on hand — recount to fix before deleting`;
   // Which entry a ledger row tap opened, if any — opening rows have no
   // `refId` and so never set this.
   const [openEntry, setOpenEntry] = useState<
@@ -107,6 +122,19 @@ function ProductForm({ product }: { product: Product }) {
     setArchiving(true);
     await unarchiveProduct({ id: product._id });
     setArchiving(false);
+  }
+
+  // For good — no undo after this, so navigating away is part of the action:
+  // this page has nothing left to show once the product is gone from every
+  // list that would have linked back to it.
+  async function handleDelete() {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    setDeleting(true);
+    await deleteProduct({ id: product._id });
+    router.push("/products");
   }
 
   return (
@@ -190,14 +218,47 @@ function ProductForm({ product }: { product: Product }) {
       </form>
 
       {isArchived ? (
-        <button
-          type="button"
-          onClick={handleUnarchive}
-          disabled={archiving}
-          className="w-full rounded-xl border border-line py-2.5 font-semibold"
-        >
-          {archiving ? "Unarchiving..." : "Unarchive Product"}
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={handleUnarchive}
+            disabled={archiving}
+            className="w-full rounded-xl border border-line py-2.5 font-semibold"
+          >
+            {archiving ? "Unarchiving..." : "Unarchive Product"}
+          </button>
+          <div className="flex gap-2">
+            {confirmingDelete && (
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+                className="card flex-1 py-2.5 font-semibold"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting || deleteBlockedReason !== null}
+              className={`flex-1 rounded-xl border py-2.5 font-semibold disabled:opacity-50 ${
+                confirmingDelete
+                  ? "bg-danger border-danger text-white"
+                  : "text-danger border-line"
+              }`}
+            >
+              {deleting
+                ? "Deleting..."
+                : confirmingDelete
+                  ? "Confirm Delete"
+                  : "Delete Product"}
+            </button>
+          </div>
+          {deleteBlockedReason && (
+            <p className="text-sub text-[13px]">{deleteBlockedReason}</p>
+          )}
+        </div>
       ) : (
         <div className="flex gap-2">
           {confirmingArchive && (
