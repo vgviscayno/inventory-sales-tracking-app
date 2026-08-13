@@ -16,6 +16,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { SupplierPicker } from "../SupplierPicker";
 
 // A line either names a product that already exists, or (once "+ Add as new
 // product" is chosen) is still collecting the name and price it'll be
@@ -75,6 +76,7 @@ export function DeliverySheet({
 
   const [search, setSearch] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
+  const [supplierId, setSupplierId] = useState<Id<"suppliers"> | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Whether she has been shown the below-zero warning yet, cleared whenever
@@ -99,6 +101,7 @@ export function DeliverySheet({
     }
 
     prefilled.current = true;
+    setSupplierId(existingEntry.supplierId ?? null);
     const activeIds = new Set(allProducts.map((p) => p._id));
     setLines(
       existingEntry.lines.map((l) =>
@@ -339,6 +342,7 @@ export function DeliverySheet({
               productId: l.productId,
               quantity: l.quantity,
             })),
+          supplierId,
           allowNegative: warned,
         });
       } else {
@@ -359,6 +363,7 @@ export function DeliverySheet({
                     quantity: l.quantity,
                   },
             ),
+          supplierId: supplierId ?? undefined,
         });
       }
       onClose();
@@ -552,6 +557,10 @@ export function DeliverySheet({
               Search above and tap a product to add it to this delivery
             </p>
           )}
+        </div>
+
+        <div className="mt-3">
+          <SupplierPicker value={supplierId} onChange={setSupplierId} />
         </div>
 
         {error && <p className="text-danger mt-2 text-sm">{error}</p>}

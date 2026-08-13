@@ -394,10 +394,7 @@ function ledgerContext(row: LedgerRow): string | null {
       ? `${row.reasonCategory} — ${row.reasonNotes}`
       : row.reasonCategory;
   }
-  // No supplier field exists yet — see schema.ts's note on the `deliveries`
-  // table — but the row's context slot is here, ready for the suppliers
-  // ticket to fill in without touching layout.
-  if (row.type === "delivery") return "No supplier yet";
+  if (row.type === "delivery") return row.supplierName ?? "No supplier";
   return null;
 }
 
