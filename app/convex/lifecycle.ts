@@ -21,8 +21,7 @@ export function isActive(doc: Lifecycle): boolean {
  * so archived rows stop being selectable without any caller having to ask for
  * that explicitly. `"withArchived"` is for the one place that needs archived
  * rows back: the collapsed Archived section. Deleted rows never come back
- * through either value — delete is the next ticket, and nothing in this one
- * writes `deletedAt`, but the filter is already correct for when it does.
+ * through either value, for products or customers alike.
  */
 export function filterLifecycle<T extends Lifecycle>(
   docs: T[],

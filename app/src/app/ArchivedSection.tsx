@@ -12,9 +12,15 @@ import { useState } from "react";
  */
 export function ArchivedSection({
   count,
+  subtitle,
   children,
 }: {
   count: number;
+  // A line rendered next to the count while the section is collapsed — the
+  // seam customers hangs "total still owed" off of, so that debt sums where
+  // the row that carries it is one tap away, without products (which have no
+  // such total) needing to pass anything.
+  subtitle?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -31,6 +37,7 @@ export function ArchivedSection({
       >
         <span className="font-semibold">Archived</span>
         <span className="text-sub text-[13px]">
+          {subtitle ? <>{subtitle} · </> : null}
           {count} {open ? "▲" : "▼"}
         </span>
       </button>
