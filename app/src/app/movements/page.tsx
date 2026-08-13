@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -90,7 +91,15 @@ export default function MovementsPage() {
 
   return (
     <main className="flex-1 p-3.5 space-y-3 pb-24">
-      <h2 className="mt-1 mb-1 text-lg font-semibold">Movements</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="mt-1 mb-1 text-lg font-semibold">Movements</h2>
+        <Link
+          href="/movements/suppliers"
+          className="text-accent text-sm font-semibold"
+        >
+          Suppliers
+        </Link>
+      </div>
 
       <div className="grid grid-cols-2 gap-2">
         <button
