@@ -70,3 +70,8 @@ body {
   background: var(--line);
   color: var(--sub);
 }
+.pill.deleted {
+  background: var(--line);
+  color: var(--sub);
+  opacity: 0.7;
+}

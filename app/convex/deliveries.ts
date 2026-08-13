@@ -23,8 +23,11 @@ export const create = mutation({
         }),
       ),
     ),
+    // Optional — stock bought retail, received as a gift, or from someone
+    // she doesn't need to name is still recordable.
+    supplierId: v.optional(v.id("suppliers")),
   },
-  handler: async (ctx, { lines }) => {
+  handler: async (ctx, { lines, supplierId }) => {
     if (lines.length === 0) {
       throw new Error("A delivery must have at least one line");
     }
@@ -39,6 +42,7 @@ export const create = mutation({
 
     const deliveryId = await ctx.db.insert("deliveries", {
       createdAt: Date.now(),
+      supplierId,
     });
 
     // One `recordMovement` call per line, even when two lines name the same

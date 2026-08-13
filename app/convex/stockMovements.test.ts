@@ -3,6 +3,7 @@ import { api, internal } from "./_generated/api";
 import {
   aCustomer,
   aProductHolding,
+  aSupplier,
   expectCacheMatchesLedger,
   setupTest,
 } from "./test.helpers";
@@ -173,6 +174,168 @@ test("editEntry moves a delivery product's count by exactly the difference, in e
     quantityOnHand: 32, // 27 - 7 + 12
   });
   await expectCacheMatchesLedger(t, coke);
+});
+
+test("a product's ledger names a delivery's supplier", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const supplierId = await aSupplier(t, "Aling Rosa Distribution");
+
+  await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
+    supplierId,
+  });
+
+  const ledger = await t.query(api.stockMovements.listForProduct, {
+    productId: coke,
+  });
+  expect(ledger[0]).toMatchObject({
+    type: "delivery",
+    supplierName: "Aling Rosa Distribution",
+  });
+});
+
+test("a delivery attached to a deleted supplier still renders its name on the ledger", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const supplierId = await aSupplier(t, "Ghost Supplier");
+  await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
+    supplierId,
+  });
+  await t.mutation(api.suppliers.archive, { id: supplierId });
+  await t.mutation(api.suppliers.remove, { id: supplierId });
+
+  const ledger = await t.query(api.stockMovements.listForProduct, {
+    productId: coke,
+  });
+  expect(ledger[0]).toMatchObject({ supplierName: "Ghost Supplier" });
+});
+
+test("editEntry changes a delivery's supplier after the fact", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const originalSupplier = await aSupplier(t, "Original Supplier");
+  const newSupplier = await aSupplier(t, "New Supplier");
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 10 }],
+    supplierId: originalSupplier,
+  });
+  const [line] = (await t.query(api.deliveries.list, {}))[0].lines;
+
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+    lines: [{ movementId: line.movementId, productId: coke, quantity: 10 }],
+    supplierId: newSupplier,
+  });
+
+  expect(
+    await t.query(api.stockMovements.getEntry, {
+      entry: { type: "delivery", entryId: deliveryId },
+    }),
+  ).toMatchObject({ supplierId: newSupplier });
+});
+
+test("editEntry clears a delivery's supplier when passed null", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const supplierId = await aSupplier(t, "Original Supplier");
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 10 }],
+    supplierId,
+  });
+  const [line] = (await t.query(api.deliveries.list, {}))[0].lines;
+
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+    lines: [{ movementId: line.movementId, productId: coke, quantity: 10 }],
+    supplierId: null,
+  });
+
+  expect(
+    (
+      await t.query(api.stockMovements.getEntry, {
+        entry: { type: "delivery", entryId: deliveryId },
+      })
+    ).supplierId,
+  ).toBe(undefined);
+});
+
+// Editing an unrelated field (here, the quantity) must never touch the
+// supplier — omitting `supplierId` from the call leaves it exactly as it was.
+test("editEntry leaves a delivery's supplier untouched when the edit doesn't mention it", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const supplierId = await aSupplier(t, "Untouched Supplier");
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 10 }],
+    supplierId,
+  });
+  const [line] = (await t.query(api.deliveries.list, {}))[0].lines;
+
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+    lines: [{ movementId: line.movementId, productId: coke, quantity: 12 }],
+  });
+
+  expect(
+    await t.query(api.stockMovements.getEntry, {
+      entry: { type: "delivery", entryId: deliveryId },
+    }),
+  ).toMatchObject({ supplierId });
+});
+
+// The load-bearing case from the ticket: an archived supplier already
+// attached to a delivery survives an edit to an unrelated field.
+test("editing an unrelated field on a delivery whose supplier is archived leaves that supplier attached", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const supplierId = await aSupplier(t, "Archived Supplier");
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 10 }],
+    supplierId,
+  });
+  await t.mutation(api.suppliers.archive, { id: supplierId });
+  const [line] = (await t.query(api.deliveries.list, {}))[0].lines;
+
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+    lines: [{ movementId: line.movementId, productId: coke, quantity: 15 }],
+  });
+
+  expect(
+    await t.query(api.stockMovements.getEntry, {
+      entry: { type: "delivery", entryId: deliveryId },
+    }),
+  ).toMatchObject({ supplierId });
+});
+
+test("editEntry ignores supplierId for a pull-out", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const supplierId = await aSupplier(t);
+
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [{ productId: coke, quantity: 5 }],
+    reasonCategory: "damaged",
+  });
+  const [line] = (await t.query(api.pullouts.list, {}))[0].lines;
+
+  // `supplierId` isn't a pull-out concept — the arg is accepted (it's not
+  // typed per entry-type) but the handler only ever patches it onto a
+  // `deliveries` doc, so a stray value here has nowhere to land.
+  await expect(
+    t.mutation(api.stockMovements.editEntry, {
+      entry: { type: "pullout", entryId: pulloutId },
+      lines: [{ movementId: line.movementId, productId: coke, quantity: 2 }],
+      reasonCategory: "damaged",
+      supplierId,
+    }),
+  ).resolves.not.toThrow();
 });
 
 test("editEntry moves a pull-out product's count by exactly the difference, in either direction", async () => {

@@ -185,26 +185,47 @@ export const listForProduct = query({
       (a, b) => a.createdAt - b.createdAt,
     );
 
+    // Balances are folded synchronously, before any of the `await`s below —
+    // those run concurrently over the whole array, and a shared counter
+    // mutated inside an async callback would race against them, each row
+    // reading whatever the counter had reached by the time its own lookup
+    // resolved rather than the value at its own turn.
     let runningBalance = 0;
-    const rows = oldestFirst.map((m) => {
-      runningBalance += m.quantity;
-      return {
-        _id: m._id,
-        type: m.type,
-        // Undefined for `opening` rows, which have no header entry to open —
-        // the ledger row itself is the whole story for those.
-        refId: m.refId,
-        createdAt: m.createdAt,
-        netChange: m.quantity,
-        runningBalance,
-        lineTotal:
-          m.type === "sale" && m.unitPriceAtSale !== undefined
-            ? -m.quantity * m.unitPriceAtSale
-            : undefined,
-        reasonCategory: m.reasonCategory,
-        reasonNotes: m.reasonNotes,
-      };
-    });
+    const balances = oldestFirst.map((m) => (runningBalance += m.quantity));
+
+    const rows = await Promise.all(
+      oldestFirst.map(async (m, i) => {
+        // A delivery row's supplier lives on the `deliveries` header, not on
+        // the movement itself — `ctx.db.get` on both hops bypasses lifecycle
+        // filtering the same way `sales.list`'s customer join does, so an
+        // archived or deleted supplier's name still renders here.
+        let supplierName: string | undefined;
+        if (m.type === "delivery" && m.refId !== undefined) {
+          const delivery = await ctx.db.get(m.refId as Id<"deliveries">);
+          if (delivery?.supplierId !== undefined) {
+            const supplier = await ctx.db.get(delivery.supplierId);
+            supplierName = supplier?.name;
+          }
+        }
+        return {
+          _id: m._id,
+          type: m.type,
+          // Undefined for `opening` rows, which have no header entry to open —
+          // the ledger row itself is the whole story for those.
+          refId: m.refId,
+          createdAt: m.createdAt,
+          netChange: m.quantity,
+          runningBalance: balances[i],
+          lineTotal:
+            m.type === "sale" && m.unitPriceAtSale !== undefined
+              ? -m.quantity * m.unitPriceAtSale
+              : undefined,
+          reasonCategory: m.reasonCategory,
+          reasonNotes: m.reasonNotes,
+          supplierName,
+        };
+      }),
+    );
 
     return rows.reverse();
   },
@@ -264,11 +285,14 @@ export const getEntry = query({
             .withIndex("by_refId", (q) => q.eq("refId", entry.entryId))
             .first()
         : null;
+    const delivery =
+      entry.type === "delivery" ? await ctx.db.get(entry.entryId) : null;
 
     return {
       lines,
       reasonCategory: reasonRow?.reasonCategory,
       reasonNotes: reasonRow?.reasonNotes,
+      supplierId: delivery?.supplierId,
     };
   },
 });
@@ -298,6 +322,10 @@ export const editEntry = mutation({
     ),
     reasonCategory: v.optional(reasonCategory),
     reasonNotes: v.optional(v.string()),
+    // Delivery-only, mirroring `customers.update`'s notes trap: omitted
+    // leaves the delivery's supplier untouched, `null` clears it back to
+    // none, an id changes it. Ignored for a pull-out.
+    supplierId: v.optional(v.union(v.id("suppliers"), v.null())),
     // Same backstop as create's allowNegative: the warning is computed
     // client-side, so this flag is the record that a human saw it and said
     // yes. One flag for the whole edit, not one per line.
@@ -305,7 +333,7 @@ export const editEntry = mutation({
   },
   handler: async (
     ctx,
-    { entry, lines, reasonCategory, reasonNotes, allowNegative },
+    { entry, lines, reasonCategory, reasonNotes, supplierId, allowNegative },
   ) => {
     if (entry.type === "sale") {
       throw new Error("Sale entries are edited from the Register, not here");
@@ -346,6 +374,13 @@ export const editEntry = mutation({
     if (existing.some((m) => m.type !== entry.type)) {
       throw new Error(`Entry ${entry.entryId} is not a ${entry.type}`);
     }
+
+    if (entry.type === "delivery" && supplierId !== undefined) {
+      await ctx.db.patch(entry.entryId, {
+        supplierId: supplierId ?? undefined,
+      });
+    }
+
     const existingById = new Map(existing.map((m) => [m._id, m]));
 
     const referencedIds = new Set<Id<"stockMovements">>();
