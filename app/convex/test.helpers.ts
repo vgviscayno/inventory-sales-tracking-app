@@ -64,6 +64,11 @@ export async function aCustomer(t: TestConvex, name = "Aling Nena") {
   return await t.mutation(api.customers.create, { name });
 }
 
+/** A supplier created through the public mutation. */
+export async function aSupplier(t: TestConvex, name = "Mang Kanor Trading") {
+  return await t.mutation(api.suppliers.create, { name });
+}
+
 /**
  * The invariant this whole feature exists to protect: a product's cached
  * `quantityOnHand` is the sum of its `stockMovements` rows, never a number
