@@ -24,9 +24,8 @@ type Line = {
   movementId?: Id<"stockMovements">;
   productId: Id<"products">;
   quantity: number;
-  /** The quantity this line carried when the sheet opened — undefined for a
-   * line added during this edit. */
   originalQuantity?: number;
+  deletedProductName?: string;
 };
 
 const REASONS = [
@@ -85,6 +84,7 @@ export function PulloutSheet({
       return;
     }
     prefilled.current = true;
+    const activeIds = new Set(allProducts.map((p) => p._id));
     setLines(
       existingEntry.lines.map((l) => ({
         key: l.movementId,
@@ -92,13 +92,16 @@ export function PulloutSheet({
         productId: l.productId,
         quantity: Math.abs(l.quantity),
         originalQuantity: Math.abs(l.quantity),
+        ...(activeIds.has(l.productId)
+          ? {}
+          : { deletedProductName: l.productName }),
       })),
     );
     if (existingEntry.reasonCategory) {
       setReasonCategory(existingEntry.reasonCategory as Reason);
     }
     setReasonNotes(existingEntry.reasonNotes ?? "");
-  }, [isEditing, existingEntry]);
+  }, [isEditing, existingEntry, allProducts]);
 
   const matches = search.trim()
     ? allProducts.filter((p) =>
@@ -141,11 +144,14 @@ export function PulloutSheet({
     setLines((prev) => prev.filter((l) => l.key !== key));
   }
 
-  // Each line joined to the product as it stands right now, dropping any line
-  // whose product got deleted mid-edit.
-  const resolvedLines = lines.flatMap((line) => {
+  type ResolvedLine =
+    | (Line & { product: (typeof allProducts)[number]; deleted: false })
+    | (Line & { deleted: true });
+
+  const resolvedLines = lines.flatMap<ResolvedLine>((line) => {
+    if (line.deletedProductName) return [{ ...line, deleted: true }];
     const product = allProducts.find((p) => p._id === line.productId);
-    return product ? [{ ...line, product }] : [];
+    return product ? [{ ...line, product, deleted: false }] : [];
   });
 
   // Net delta per product this save would cause, relative to what's already
@@ -209,9 +215,8 @@ export function PulloutSheet({
     },
   );
 
-  // Removing every line and saving is deleting the entry — see `handleSave` —
-  // so it needs the save button enabled at zero lines rather than disabled.
-  const isDeleteViaEmptySave = isEditing && resolvedLines.length === 0;
+  const editableLines = resolvedLines.filter((l) => !l.deleted);
+  const isDeleteViaEmptySave = isEditing && editableLines.length === 0;
 
   const noteRequired = reasonCategory === "other";
   const canSave =
@@ -400,6 +405,31 @@ export function PulloutSheet({
 
         <div className="mt-3 space-y-2">
           {resolvedLines.map((l) => {
+            if (l.deleted) {
+              return (
+                <div
+                  key={l.key}
+                  className="space-y-1 rounded-lg p-1.5 opacity-60"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="pill shrink-0 bg-neutral-200 text-neutral-500 dark:bg-neutral-700 dark:text-neutral-400">
+                        Deleted
+                      </span>
+                      <div className="min-w-0 truncate">
+                        {l.deletedProductName}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
+                        ×{l.quantity}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
             const isFocused =
               focusProductId !== undefined && l.productId === focusProductId;
             const isOther = focusProductId !== undefined && !isFocused;
@@ -452,11 +482,6 @@ export function PulloutSheet({
                     </button>
                   </div>
                 </div>
-                {/* This per-line hint compares against the live count, which
-                    already has this line's *original* quantity baked in
-                    while editing — the entry-wide warning below is what
-                    judges the net effect correctly, so this stays
-                    create-only. */}
                 {!isEditing && l.quantity > l.product.quantityOnHand && (
                   <div className="text-danger text-xs">
                     Only {l.product.quantityOnHand} on hand

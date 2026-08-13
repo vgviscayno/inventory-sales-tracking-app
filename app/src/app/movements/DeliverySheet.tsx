@@ -38,6 +38,15 @@ type Line =
       originalQuantity?: number;
     }
   | {
+      kind: "deleted";
+      key: string;
+      movementId: Id<"stockMovements">;
+      productId: Id<"products">;
+      productName: string;
+      quantity: number;
+      originalQuantity: number;
+    }
+  | {
       kind: "new";
       key: string;
       name: string;
@@ -88,18 +97,32 @@ export function DeliverySheet({
     if (!isEditing || prefilled.current || existingEntry === undefined) {
       return;
     }
+
     prefilled.current = true;
+    const activeIds = new Set(allProducts.map((p) => p._id));
     setLines(
-      existingEntry.lines.map((l) => ({
-        kind: "existing" as const,
-        key: l.movementId,
-        movementId: l.movementId,
-        productId: l.productId,
-        quantity: l.quantity,
-        originalQuantity: l.quantity,
-      })),
+      existingEntry.lines.map((l) =>
+        activeIds.has(l.productId)
+          ? {
+              kind: "existing" as const,
+              key: l.movementId,
+              movementId: l.movementId,
+              productId: l.productId,
+              quantity: l.quantity,
+              originalQuantity: l.quantity,
+            }
+          : {
+              kind: "deleted" as const,
+              key: l.movementId,
+              movementId: l.movementId,
+              productId: l.productId,
+              productName: l.productName,
+              quantity: l.quantity,
+              originalQuantity: l.quantity,
+            },
+      ),
     );
-  }, [isEditing, existingEntry]);
+  }, [isEditing, existingEntry, allProducts]);
 
   const trimmedSearch = search.trim();
   const matches = trimmedSearch
@@ -170,17 +193,15 @@ export function DeliverySheet({
     setLines((prev) => prev.filter((l) => l.key !== key));
   }
 
-  // Existing lines joined to the product as it stands right now, dropping any
-  // line whose product got deleted mid-edit; new lines pass through as-is —
-  // there's no product to join to until save creates one.
   type ResolvedLine =
     | (Extract<Line, { kind: "existing" }> & {
         product: (typeof allProducts)[number];
       })
+    | Extract<Line, { kind: "deleted" }>
     | Extract<Line, { kind: "new" }>;
 
   const resolvedLines = lines.flatMap<ResolvedLine>((line) => {
-    if (line.kind === "new") return [line];
+    if (line.kind === "new" || line.kind === "deleted") return [line];
     const product = allProducts.find((p) => p._id === line.productId);
     return product ? [{ ...line, product }] : [];
   });
@@ -244,15 +265,17 @@ export function DeliverySheet({
     },
   );
 
-  // Removing every line and saving is deleting the entry — see `handleSave` —
-  // so it needs the save button enabled at zero lines rather than disabled.
-  const isDeleteViaEmptySave = isEditing && resolvedLines.length === 0;
+  const editableLines = resolvedLines.filter((l) => l.kind !== "deleted");
+  const isDeleteViaEmptySave = isEditing && editableLines.length === 0;
 
   const canSave =
     isDeleteViaEmptySave ||
     (resolvedLines.length > 0 &&
       resolvedLines.every(
-        (l) => l.kind === "existing" || Number(l.sellingPrice) > 0,
+        (l) =>
+          l.kind === "existing" ||
+          l.kind === "deleted" ||
+          Number(l.sellingPrice) > 0,
       ));
 
   useEffect(() => {
@@ -304,8 +327,12 @@ export function DeliverySheet({
           entry: { type: "delivery", entryId },
           lines: resolvedLines
             .filter(
-              (l): l is Extract<ResolvedLine, { kind: "existing" }> =>
-                l.kind === "existing",
+              (
+                l,
+              ): l is
+                | Extract<ResolvedLine, { kind: "existing" }>
+                | Extract<ResolvedLine, { kind: "deleted" }> =>
+                l.kind === "existing" || l.kind === "deleted",
             )
             .map((l) => ({
               movementId: l.movementId,
@@ -316,20 +343,22 @@ export function DeliverySheet({
         });
       } else {
         await createDelivery({
-          lines: resolvedLines.map((l) =>
-            l.kind === "existing"
-              ? {
-                  kind: "existing",
-                  productId: l.productId,
-                  quantity: l.quantity,
-                }
-              : {
-                  kind: "new",
-                  name: l.name,
-                  sellingPrice: Number(l.sellingPrice),
-                  quantity: l.quantity,
-                },
-          ),
+          lines: resolvedLines
+            .filter((l) => l.kind !== "deleted")
+            .map((l) =>
+              l.kind === "existing"
+                ? {
+                    kind: "existing",
+                    productId: l.productId,
+                    quantity: l.quantity,
+                  }
+                : {
+                    kind: "new",
+                    name: l.name,
+                    sellingPrice: Number(l.sellingPrice),
+                    quantity: l.quantity,
+                  },
+            ),
         });
       }
       onClose();
@@ -428,6 +457,28 @@ export function DeliverySheet({
               focusProductId !== undefined &&
               l.kind === "existing" &&
               !isFocused;
+
+            if (l.kind === "deleted") {
+              return (
+                <div
+                  key={l.key}
+                  className="flex items-center justify-between gap-2 rounded-lg p-1.5 opacity-60"
+                >
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="pill shrink-0 bg-neutral-200 text-neutral-500 dark:bg-neutral-700 dark:text-neutral-400">
+                      Deleted
+                    </span>
+                    <div className="min-w-0 truncate">{l.productName}</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
+                      ×{l.quantity}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div
                 key={l.key}
