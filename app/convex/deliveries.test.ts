@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { api } from "./_generated/api";
 import {
   aProductHolding,
+  aSupplier,
   expectCacheMatchesLedger,
   setupTest,
 } from "./test.helpers";
@@ -45,6 +46,32 @@ test("two lines for the same product in one delivery both move stock", async () 
     quantityOnHand: 25,
   });
   await expectCacheMatchesLedger(t, coke);
+});
+
+test("a delivery saves fine with no supplier", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
+  });
+
+  const entry = await t.run((ctx) => ctx.db.get(deliveryId));
+  expect(entry?.supplierId).toBe(undefined);
+});
+
+test("a delivery can carry a supplier chosen at creation", async () => {
+  const t = setupTest();
+  const coke = await aProductHolding(t, 20);
+  const supplierId = await aSupplier(t, "Aling Rosa Distribution");
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: coke, quantity: 5 }],
+    supplierId,
+  });
+
+  const entry = await t.run((ctx) => ctx.db.get(deliveryId));
+  expect(entry?.supplierId).toBe(supplierId);
 });
 
 test("a delivery must have at least one line", async () => {
