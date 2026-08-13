@@ -5,9 +5,8 @@ import { filterLifecycle } from "./lifecycle";
 export const list = query({
   args: {
     // Every caller that doesn't ask otherwise gets active suppliers only —
-    // in particular the delivery sheet's picker, which is the only caller
-    // this ticket has. `"withArchived"` is here for symmetry with
-    // `customers.list` even though nothing yet asks for it.
+    // the delivery sheet's picker and the Suppliers list's main section.
+    // Only the collapsed Archived section asks for `"withArchived"`.
     include: v.optional(
       v.union(v.literal("active"), v.literal("withArchived")),
     ),
@@ -33,6 +32,22 @@ export const create = mutation({
   handler: async (ctx, args) => await ctx.db.insert("suppliers", args),
 });
 
+export const update = mutation({
+  args: {
+    id: v.id("suppliers"),
+    name: v.optional(v.string()),
+    // null clears notes back to unset; omitted leaves the existing value
+    // untouched — same trap and workaround as `customers.update`'s notes.
+    notes: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, { id, notes, ...patch }) => {
+    await ctx.db.patch(id, {
+      ...patch,
+      ...(notes !== undefined ? { notes: notes ?? undefined } : {}),
+    });
+  },
+});
+
 /**
  * Archive is never gated, same reasoning as `customers.archive`. Nothing
  * here touches `deliveries`; archiving changes visibility, never a delivery
@@ -42,6 +57,16 @@ export const archive = mutation({
   args: { id: v.id("suppliers") },
   handler: async (ctx, { id }) => {
     await ctx.db.patch(id, { archivedAt: Date.now() });
+  },
+});
+
+/**
+ * The one-tap reversal — no confirm, same reasoning as `customers.unarchive`.
+ */
+export const unarchive = mutation({
+  args: { id: v.id("suppliers") },
+  handler: async (ctx, { id }) => {
+    await ctx.db.patch(id, { archivedAt: undefined });
   },
 });
 
