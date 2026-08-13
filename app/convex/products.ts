@@ -115,10 +115,31 @@ export const update = mutation({
   },
 });
 
+/**
+ * One-way and gated on both halves of the state the client can't be trusted
+ * to have checked: archived (she's decided it isn't coming back) and empty
+ * (nothing on hand to blank out of the ledger's arithmetic) — a negative
+ * count fails this too, since a deleted-while-negative product would be an
+ * unreconcilable cache row with no UI left to repair it. The UI disables the
+ * button on this same pair of conditions, but that's an affordance; this
+ * throw is the guarantee. A soft patch rather than `ctx.db.delete`, so
+ * `quantityOnHand` and every `stockMovements` row survive untouched and a
+ * deleted product's name keeps rendering wherever it's already been named.
+ */
 export const remove = mutation({
   args: { id: v.id("products") },
   handler: async (ctx, { id }) => {
-    await ctx.db.delete(id);
+    const product = await ctx.db.get(id);
+    if (!product) throw new Error("Product not found");
+    if (product.archivedAt === undefined) {
+      throw new Error("Only an archived product can be deleted");
+    }
+    if (product.quantityOnHand !== 0) {
+      throw new Error(
+        `${product.quantityOnHand} still on hand — pull them out first`,
+      );
+    }
+    await ctx.db.patch(id, { deletedAt: Date.now() });
   },
 });
 
