@@ -19,6 +19,9 @@ export default defineSchema({
   customers: defineTable({
     name: v.string(),
     notes: v.optional(v.string()),
+    // Uniform two-state lifecycle, absent meaning active — see lifecycle.ts.
+    archivedAt: v.optional(v.number()),
+    deletedAt: v.optional(v.number()),
   }),
 
   sales: defineTable({

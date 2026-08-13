@@ -1,10 +1,16 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+
+// Derived from the query rather than restated — see the identical note on
+// `ProductDetail.tsx`'s `Product` type.
+type Customer = NonNullable<FunctionReturnType<typeof api.customers.get>>;
 
 export function CustomerProfile({
   customerId,
@@ -12,17 +18,90 @@ export function CustomerProfile({
   customerId: Id<"customers">;
 }) {
   const customer = useQuery(api.customers.get, { id: customerId });
+
+  if (customer === undefined) {
+    return <main className="text-sub flex-1 p-4">Loading...</main>;
+  }
+  if (customer === null) {
+    return <main className="text-sub flex-1 p-4">Customer not found</main>;
+  }
+
+  return <CustomerPage key={customer._id} customer={customer} />;
+}
+
+function CustomerPage({ customer }: { customer: Customer }) {
+  const router = useRouter();
+  const customerId = customer._id;
   const sales = useQuery(api.sales.listForCustomer, { customerId }) ?? [];
   const payments = useQuery(api.payments.listForCustomer, { customerId }) ?? [];
   const recordPayment = useMutation(api.payments.create);
+  const updateCustomer = useMutation(api.customers.update);
+  const archiveCustomer = useMutation(api.customers.archive);
+  const unarchiveCustomer = useMutation(api.customers.unarchive);
+  const deleteCustomer = useMutation(api.customers.remove);
+
+  const [name, setName] = useState(customer.name);
+  const [customerNotes, setCustomerNotes] = useState(customer.notes ?? "");
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Delete is one-way, so it gets a two-tap confirm, same as products' —
+  // even though the button is already disabled until the balance is zero.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const isArchived = customer.archivedAt != null;
+  // Mirrors the server's gate (see `customers.remove`) so what the button
+  // shows and what it's actually allowed to do never disagree. Gated in
+  // either direction — an overpayment blocks deletion exactly like a debt.
+  const deleteBlockedReason =
+    customer.balance === 0
+      ? null
+      : customer.balance > 0
+        ? `₱${customer.balance.toFixed(2)} owed — settle first`
+        : `₱${(-customer.balance).toFixed(2)} overpaid — settle first`;
 
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
 
-  if (!customer) {
-    return <main className="text-sub flex-1 p-4">Loading...</main>;
+  const canSaveDetails = name.trim().length > 0;
+
+  async function handleSaveDetails(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSaveDetails) return;
+    setSavingDetails(true);
+    await updateCustomer({
+      id: customerId,
+      name: name.trim(),
+      notes: customerNotes.trim() || null,
+    });
+    setSavingDetails(false);
+  }
+
+  // Never gated — a customer with a debt archives on one tap, the same tap
+  // as any other customer. The balance keeps rendering on her row and in the
+  // Archived section header, so nothing about it needs a warning first.
+  async function handleArchive() {
+    setArchiving(true);
+    await archiveCustomer({ id: customerId });
+    setArchiving(false);
+  }
+
+  async function handleUnarchive() {
+    setArchiving(true);
+    await unarchiveCustomer({ id: customerId });
+    setArchiving(false);
+  }
+
+  // For good — no undo after this, so navigating away is part of the action.
+  async function handleDelete() {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    setDeleting(true);
+    await deleteCustomer({ id: customerId });
+    router.push("/customers");
   }
 
   async function handleRecordPayment(e: React.FormEvent) {
@@ -66,9 +145,8 @@ export function CustomerProfile({
       </Link>
 
       <div className="card mb-3.5 p-3">
-        <h2 className="text-lg font-semibold">{customer.name}</h2>
         <div
-          className="mt-2 text-[22px] font-bold"
+          className="text-[22px] font-bold"
           style={{
             color: customer.balance > 0 ? "var(--utang)" : "var(--ink)",
           }}
@@ -77,6 +155,104 @@ export function CustomerProfile({
         </div>
         <div className="text-sub">current balance</div>
       </div>
+
+      <form
+        onSubmit={handleSaveDetails}
+        className="card mb-3.5 space-y-2.5 p-3"
+      >
+        <div>
+          <label
+            htmlFor="customer-name"
+            className="text-sub block text-[13px] mb-1"
+          >
+            Name
+          </label>
+          <input
+            id="customer-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="customer-notes"
+            className="text-sub block text-[13px] mb-1"
+          >
+            Notes (optional)
+          </label>
+          <textarea
+            id="customer-notes"
+            value={customerNotes}
+            onChange={(e) => setCustomerNotes(e.target.value)}
+            rows={2}
+            className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+          />
+        </div>
+        {isArchived && (
+          <span className="pill archived inline-block">Archived</span>
+        )}
+        <button
+          type="submit"
+          disabled={savingDetails || !canSaveDetails}
+          className="w-full rounded-xl bg-accent py-2.5 font-bold text-accent-ink disabled:bg-[#d6d3d1]"
+        >
+          {savingDetails ? "Saving..." : "Save Changes"}
+        </button>
+      </form>
+
+      {isArchived ? (
+        <div className="mb-3.5 space-y-2">
+          <button
+            type="button"
+            onClick={handleUnarchive}
+            disabled={archiving}
+            className="w-full rounded-xl border border-line py-2.5 font-semibold"
+          >
+            {archiving ? "Unarchiving..." : "Unarchive Customer"}
+          </button>
+          <div className="flex gap-2">
+            {confirmingDelete && (
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+                className="card flex-1 py-2.5 font-semibold"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting || deleteBlockedReason !== null}
+              className={`flex-1 rounded-xl border py-2.5 font-semibold disabled:opacity-50 ${
+                confirmingDelete
+                  ? "bg-danger border-danger text-white"
+                  : "text-danger border-line"
+              }`}
+            >
+              {deleting
+                ? "Deleting..."
+                : confirmingDelete
+                  ? "Confirm Delete"
+                  : "Delete Customer"}
+            </button>
+          </div>
+          {deleteBlockedReason && (
+            <p className="text-sub text-[13px]">{deleteBlockedReason}</p>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handleArchive}
+          disabled={archiving}
+          className="mb-3.5 w-full rounded-xl border border-line py-2.5 font-semibold text-danger"
+        >
+          {archiving ? "Archiving..." : "Archive Customer"}
+        </button>
+      )}
 
       <h3 className="mb-2 text-sm font-semibold">Record a payment</h3>
       {!formOpen ? (

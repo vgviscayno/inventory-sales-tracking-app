@@ -4,9 +4,19 @@ import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
+import { ArchivedSection } from "../ArchivedSection";
 
 export default function CustomersPage() {
-  const customers = useQuery(api.customers.list) ?? [];
+  // One query covering both sections, split client-side — see the identical
+  // note on the Products list.
+  const allCustomers =
+    useQuery(api.customers.list, { include: "withArchived" }) ?? [];
+  const customers = allCustomers.filter((c) => c.archivedAt == null);
+  const archivedCustomers = allCustomers.filter((c) => c.archivedAt != null);
+  const archivedOwed = archivedCustomers.reduce(
+    (sum, c) => sum + Math.max(c.balance, 0),
+    0,
+  );
   const createCustomer = useMutation(api.customers.create);
   const [name, setName] = useState("");
   const [adding, setAdding] = useState(false);
@@ -61,6 +71,29 @@ export default function CustomersPage() {
           <p className="text-sub text-center py-8">No customers yet</p>
         )}
       </div>
+
+      <ArchivedSection
+        count={archivedCustomers.length}
+        subtitle={
+          archivedOwed > 0 ? `₱${archivedOwed.toFixed(2)} owed` : undefined
+        }
+      >
+        {archivedCustomers.map((c) => (
+          <Link
+            key={c._id}
+            href={`/customers/${c._id}`}
+            className="card flex items-center justify-between px-3 py-3 opacity-70"
+          >
+            <span className="font-semibold">{c.name}</span>
+            <div className="flex items-center gap-2">
+              {c.balance > 0 && (
+                <span className="pill utang">₱{c.balance.toFixed(2)} owed</span>
+              )}
+              <span className="pill archived">Archived</span>
+            </div>
+          </Link>
+        ))}
+      </ArchivedSection>
     </main>
   );
 }

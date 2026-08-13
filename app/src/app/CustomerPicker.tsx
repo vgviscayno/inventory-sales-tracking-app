@@ -12,7 +12,7 @@ export function CustomerPicker({
   value: Id<"customers"> | null;
   onChange: (id: Id<"customers"> | null) => void;
 }) {
-  const customers = useQuery(api.customers.list) ?? [];
+  const customers = useQuery(api.customers.list, {}) ?? [];
   const createCustomer = useMutation(api.customers.create);
   const [query, setQuery] = useState("");
 
