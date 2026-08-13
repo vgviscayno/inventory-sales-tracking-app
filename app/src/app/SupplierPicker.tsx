@@ -47,9 +47,11 @@ export function SupplierPicker({
       <div className="card flex items-center justify-between px-3 py-2.5">
         <span className="flex items-center gap-1.5 font-medium">
           {selected.name}
-          {selected.archivedAt != null && (
+          {selected.deletedAt != null ? (
+            <span className="pill deleted">Deleted</span>
+          ) : selected.archivedAt != null ? (
             <span className="pill archived">Archived</span>
-          )}
+          ) : null}
         </span>
         <button
           type="button"
