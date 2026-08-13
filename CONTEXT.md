@@ -2,6 +2,32 @@
 
 ## Language
 
+### Domain vocabulary
+
+**Unit**:
+A way a product can be counted and transacted — `piece`, `tray`, `sack`. Every product has at least one, and may have several: eggs are handled both as pieces and as trays.
+_Avoid_: measure, UOM, packaging
+
+**Base unit**:
+The single Unit a product's stock is counted in. Every quantity the app holds about that product's stock — how much is on hand, the threshold at which it reads as low — is expressed in it. Which Unit plays this role is a decision recorded per product, not inferred from the Units themselves.
+_Avoid_: piece (that is one product's Base unit, not the concept), smallest unit, primary unit
+
+**Base equivalent**:
+How many Base units one of a given Unit amounts to — 1 for the Base unit itself, 30 for an egg tray. It belongs to the pairing of a product and a Unit: a tray of eggs and a tray of tomatoes need not agree. A product's Base unit is expected to be fine enough that everything the store actually transacts comes to a whole number of it — rice counted in grams rather than kilos, so that selling 1.7 kg lands exactly. Quantities are allowed to be decimal where the store genuinely sells that way; what the Base unit's fineness buys is that the stock ledger itself never has to hold a fraction.
+_Avoid_: conversion factor (silent about direction), multiplier, ratio
+
+**Default unit**:
+The Unit a product leads with — the one its price is quoted in on listings, and the one preselected when someone logs a movement against it. A separate decision from the Base unit, because what a product is counted in and what it usually changes hands in need not be the same. Where no choice is recorded, the Base unit stands in. It is also how the shop-wide low-stock threshold stays meaningful across a catalogue that counts different products differently: that one shared number is read as a count of each product's Default unit, so it says "warn me under ten of however I usually sell it" rather than ten of ten different things. A threshold set on an individual product is still held in that product's Base unit.
+_Avoid_: primary unit, main unit (both blur into Base unit)
+
+**Remainder reading**:
+Showing a stock figure as a whole number of Default units plus what is left over in Base units — "10 trays, 5 pcs" rather than "305 pcs". Whether a product's figures read this way is a per-product choice, and it applies to all of them at once, so a product never mixes the two readings across a screen. It is a way of reading a quantity, never a way of holding one.
+_Avoid_: breakdown, mixed units
+
+**Unit quantity**:
+The amount recorded against a movement, expressed in the Unit the person actually chose — "2 trays" is a Unit quantity of 2 against the Unit `tray`. What the stock ledger reasons about is the Base-unit amount this comes to; the Unit and Unit quantity are kept so the movement can be read back the way it was entered.
+_Avoid_: quantity (ambiguous — say whether it is in Base units or in a chosen Unit)
+
 ### Process vocabulary
 
 Git-workflow terms, not domain terms — kept here because `docs/agents/domain.md` names `CONTEXT.md` as the one glossary this repo has. See `docs/git-workflow.md` for the full workflow these terms describe.
