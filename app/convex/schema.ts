@@ -24,6 +24,14 @@ export default defineSchema({
     deletedAt: v.optional(v.number()),
   }),
 
+  suppliers: defineTable({
+    name: v.string(),
+    notes: v.optional(v.string()),
+    // Uniform two-state lifecycle, absent meaning active — see lifecycle.ts.
+    archivedAt: v.optional(v.number()),
+    deletedAt: v.optional(v.number()),
+  }),
+
   sales: defineTable({
     customerId: v.optional(v.id("customers")),
     paymentMethod: v.union(v.literal("cash"), v.literal("utang")),
@@ -43,9 +51,14 @@ export default defineSchema({
 
   // A delivery or pull-out header groups the movement rows that arrived
   // together, so a five-product shipment reads as one event. Sales already have
-  // their own header table. `suppliers` arrives in a later ticket.
+  // their own header table.
   deliveries: defineTable({
     createdAt: v.number(),
+    // Optional, same as `sales.customerId` — stock bought retail or received
+    // as a gift is still recordable with nobody named. A dangling reference
+    // (the supplier gets deleted later) has a legal absent representation, so
+    // there is no gate on deleting a supplier tied to a delivery.
+    supplierId: v.optional(v.id("suppliers")),
   }),
 
   pullouts: defineTable({
