@@ -54,9 +54,6 @@ function ProductForm({ product }: { product: Product }) {
   const deleteProduct = useMutation(api.products.remove);
 
   const [name, setName] = useState(product.name);
-  const [sellingPrice, setSellingPrice] = useState(
-    String(product.sellingPrice),
-  );
   const [lowStockThreshold, setLowStockThreshold] = useState(
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "",
   );
@@ -88,7 +85,7 @@ function ProductForm({ product }: { product: Product }) {
     | null
   >(null);
 
-  const canSave = name.trim() && Number(sellingPrice) > 0;
+  const canSave = name.trim().length > 0;
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -97,7 +94,6 @@ function ProductForm({ product }: { product: Product }) {
     await updateProduct({
       id: product._id,
       name: name.trim(),
-      sellingPrice: Number(sellingPrice),
       lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
     });
     setSaving(false);
@@ -158,32 +154,40 @@ function ProductForm({ product }: { product: Product }) {
             className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
           />
         </div>
-        <div className="flex gap-2">
-          <div className="flex-1">
-            <label
-              htmlFor="edit-selling-price"
-              className="text-sub block text-[13px] mb-1"
-            >
-              Selling price
-            </label>
-            <input
-              id="edit-selling-price"
-              type="number"
-              value={sellingPrice}
-              onChange={(e) => setSellingPrice(e.target.value)}
-              className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
-            />
-          </div>
-          <div className="flex-1">
-            <div className="text-sub block text-[13px] mb-1">Qty on hand</div>
-            <div className="px-2.5 py-2.5 text-[15px] font-semibold">
-              {product.quantityOnHand}
-            </div>
+        <div>
+          <div className="text-sub block text-[13px] mb-1">Qty on hand</div>
+          <div className="px-2.5 py-2.5 text-[15px] font-semibold">
+            {product.quantityOnHand} {product.baseUnitLabel}
           </div>
         </div>
         <Link href="/movements" className="text-accent block text-[13px]">
           Log a delivery to change this count →
         </Link>
+        <div>
+          <div className="text-sub block text-[13px] mb-1">Units</div>
+          <div className="space-y-1">
+            {product.units.map((unit) => (
+              <div
+                key={unit.label}
+                className="flex items-center justify-between rounded-lg border border-line px-2.5 py-2 text-[14px]"
+              >
+                <span>
+                  {unit.label}
+                  {unit.label === product.baseUnitLabel && (
+                    <span className="pill archived ml-1.5">Base</span>
+                  )}
+                  {unit.baseEquivalent !== 1 && (
+                    <span className="text-sub">
+                      {" "}
+                      = {unit.baseEquivalent} {product.baseUnitLabel}
+                    </span>
+                  )}
+                </span>
+                <span className="font-semibold">₱{unit.price.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
         <div>
           <label
             htmlFor="edit-low-stock-threshold"

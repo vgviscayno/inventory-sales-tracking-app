@@ -20,21 +20,21 @@ test("a mixed cash and utang history, less a payment, is the customer's balance"
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   // Paid in cash — owed nothing, so it must not reach the balance
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 2 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 2 }],
   });
   // ₱75 + ₱60 = ₱135 on utang
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
     items: [
-      { productId: coke, quantity: 1 },
-      { productId: pancit, quantity: 4 },
+      { productId: coke, unitLabel: "pc", quantity: 1 },
+      { productId: pancit, unitLabel: "pc", quantity: 4 },
     ],
   });
   await t.mutation(api.payments.create, {
@@ -118,7 +118,7 @@ test("archiving a customer who owes money is never blocked", async () => {
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
 
   await expect(
@@ -183,7 +183,7 @@ test("deleting an archived customer who owes money is refused, naming the amount
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   await t.mutation(api.customers.archive, { id: customerId });
 
@@ -228,7 +228,7 @@ test("a settled customer with a long sale and payment history deletes successful
     await t.mutation(api.sales.create, {
       customerId,
       paymentMethod: "utang",
-      items: [{ productId: coke, quantity: 1 }],
+      items: [{ productId: coke, unitLabel: "pc", quantity: 1 }],
     });
     await t.mutation(api.payments.create, {
       customerId,
@@ -255,7 +255,7 @@ test("a deleted customer's name still renders on their past sales and payments",
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 1 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 1 }],
   });
   await t.mutation(api.payments.create, {
     customerId,

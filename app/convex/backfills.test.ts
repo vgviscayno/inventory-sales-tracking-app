@@ -19,7 +19,8 @@ async function aProductAwaitingItsOpeningRow(
 ) {
   return await t.mutation(api.products.create, {
     name,
-    sellingPrice: 75,
+    units: [{ label: "pc", baseEquivalent: 1, price: 75 }],
+    baseUnitLabel: "pc",
     quantityOnHand,
   });
 }
@@ -41,12 +42,12 @@ test("the backfill gives each product one opening row carrying its count", async
   await t.mutation(internal.backfills.openingBalances, {});
 
   const cokeRows = await movementRowsFor(t, coke);
-  expect(cokeRows).toMatchObject([{ type: "opening", quantity: 20 }]);
+  expect(cokeRows).toMatchObject([{ type: "opening", unitQuantity: 20 }]);
   const [cokeOpening] = cokeRows;
   // An opening row stands alone — there is no delivery or sale behind it.
   expect(cokeOpening).not.toHaveProperty("refId");
   expect(await movementRowsFor(t, pancit)).toMatchObject([
-    { type: "opening", quantity: 7 },
+    { type: "opening", unitQuantity: 7 },
   ]);
 });
 
@@ -74,7 +75,7 @@ test("a product added between runs picks up its opening row on the second", asyn
 
   expect(summary).toMatchObject({ openingRowsWritten: 1 });
   expect(await movementRowsFor(t, pancit)).toMatchObject([
-    { type: "opening", quantity: 7 },
+    { type: "opening", unitQuantity: 7 },
   ]);
 });
 
@@ -85,7 +86,7 @@ test("a product that already has its opening row is left alone", async () => {
 
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   await t.mutation(internal.backfills.openingBalances, {});
 
@@ -103,13 +104,13 @@ test("a product that sold before its first backfill opens at what it started wit
   const coke = await aProductAwaitingItsOpeningRow(t, 20);
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   await t.mutation(internal.backfills.openingBalances, {});
 
   const rows = await movementRowsFor(t, coke);
   expect(rows.filter((m) => m.type === "opening")).toMatchObject([
-    { quantity: 20 },
+    { unitQuantity: 20 },
   ]);
   await expectCacheMatchesLedger(t, coke);
 

@@ -23,11 +23,55 @@ export default function ProductsPage() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
-  const [sellingPrice, setSellingPrice] = useState("");
+  const [baseUnitLabel, setBaseUnitLabel] = useState("");
+  const [baseUnitPrice, setBaseUnitPrice] = useState("");
+  // Extra Units beyond the Base one — eggs' "tray" alongside its "piece".
+  // Empty by default: a product needs only its Base unit to be sellable, and
+  // nothing here is seeded with a plausible-looking label (see
+  // docs/adr/0004-base-unit-locked.md).
+  const [extraUnits, setExtraUnits] = useState<
+    { key: string; label: string; baseEquivalent: string; price: string }[]
+  >([]);
   const [lowStockThreshold, setLowStockThreshold] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const canAdd = name.trim() && Number(sellingPrice) > 0;
+  const canAdd =
+    name.trim() &&
+    baseUnitLabel.trim() &&
+    Number(baseUnitPrice) > 0 &&
+    extraUnits.every(
+      (u) =>
+        u.label.trim() &&
+        Number.isInteger(Number(u.baseEquivalent)) &&
+        Number(u.baseEquivalent) > 0 &&
+        Number(u.price) > 0,
+    ) &&
+    new Set(
+      [baseUnitLabel.trim(), ...extraUnits.map((u) => u.label.trim())].map(
+        (l) => l.toLowerCase(),
+      ),
+    ).size ===
+      extraUnits.length + 1;
+
+  function addExtraUnit() {
+    setExtraUnits((prev) => [
+      ...prev,
+      { key: `unit:${Date.now()}`, label: "", baseEquivalent: "", price: "" },
+    ]);
+  }
+
+  function updateExtraUnit(
+    key: string,
+    patch: Partial<{ label: string; baseEquivalent: string; price: string }>,
+  ) {
+    setExtraUnits((prev) =>
+      prev.map((u) => (u.key === key ? { ...u, ...patch } : u)),
+    );
+  }
+
+  function removeExtraUnit(key: string) {
+    setExtraUnits((prev) => prev.filter((u) => u.key !== key));
+  }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
@@ -35,13 +79,27 @@ export default function ProductsPage() {
     setAdding(true);
     await createProduct({
       name: name.trim(),
-      sellingPrice: Number(sellingPrice),
+      units: [
+        {
+          label: baseUnitLabel.trim(),
+          baseEquivalent: 1,
+          price: Number(baseUnitPrice),
+        },
+        ...extraUnits.map((u) => ({
+          label: u.label.trim(),
+          baseEquivalent: Number(u.baseEquivalent),
+          price: Number(u.price),
+        })),
+      ],
+      baseUnitLabel: baseUnitLabel.trim(),
       lowStockThreshold: lowStockThreshold
         ? Number(lowStockThreshold)
         : undefined,
     });
     setName("");
-    setSellingPrice("");
+    setBaseUnitLabel("");
+    setBaseUnitPrice("");
+    setExtraUnits([]);
     setLowStockThreshold("");
     setAdding(false);
     setFormOpen(false);
@@ -82,26 +140,126 @@ export default function ProductsPage() {
               className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
             />
           </div>
-          <div>
-            <label
-              htmlFor="product-selling-price"
-              className="text-sub block text-[13px] mb-1"
-            >
-              Selling price
-            </label>
-            <input
-              id="product-selling-price"
-              type="number"
-              value={sellingPrice}
-              onChange={(e) => setSellingPrice(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
-            />
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label
+                htmlFor="product-base-unit-label"
+                className="text-sub block text-[13px] mb-1"
+              >
+                Base unit
+              </label>
+              <input
+                id="product-base-unit-label"
+                value={baseUnitLabel}
+                onChange={(e) => setBaseUnitLabel(e.target.value)}
+                placeholder="e.g. piece, gram"
+                className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+              />
+            </div>
+            <div className="flex-1">
+              <label
+                htmlFor="product-base-unit-price"
+                className="text-sub block text-[13px] mb-1"
+              >
+                Price
+              </label>
+              <input
+                id="product-base-unit-price"
+                type="number"
+                value={baseUnitPrice}
+                onChange={(e) => setBaseUnitPrice(e.target.value)}
+                placeholder="0"
+                className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+              />
+            </div>
           </div>
           <p className="text-sub text-[13px]">
-            Starts at 0 in stock — log a delivery on the Movements tab to add
-            stock once it&apos;s saved.
+            Every quantity this product's stock is held in — how much is on
+            hand, the low-stock threshold — is counted in the Base unit. Choose
+            one fine enough that everything sold comes to a whole number of it
+            (grams, not kilos, for rice sold by the fraction). Starts at 0 in
+            stock — log a delivery on the Movements tab to add stock once
+            it&apos;s saved.
           </p>
+
+          {extraUnits.map((unit) => (
+            <div
+              key={unit.key}
+              className="flex items-end gap-2 rounded-lg border border-line p-2"
+            >
+              <div className="flex-1">
+                <label
+                  htmlFor={`extra-unit-label-${unit.key}`}
+                  className="text-sub block text-[13px] mb-1"
+                >
+                  Unit
+                </label>
+                <input
+                  id={`extra-unit-label-${unit.key}`}
+                  value={unit.label}
+                  onChange={(e) =>
+                    updateExtraUnit(unit.key, { label: e.target.value })
+                  }
+                  placeholder="e.g. tray"
+                  className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2 text-[15px]"
+                />
+              </div>
+              <div className="flex-1">
+                <label
+                  htmlFor={`extra-unit-equivalent-${unit.key}`}
+                  className="text-sub block text-[13px] mb-1"
+                >
+                  = how many Base
+                </label>
+                <input
+                  id={`extra-unit-equivalent-${unit.key}`}
+                  type="number"
+                  value={unit.baseEquivalent}
+                  onChange={(e) =>
+                    updateExtraUnit(unit.key, {
+                      baseEquivalent: e.target.value,
+                    })
+                  }
+                  placeholder="30"
+                  className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2 text-[15px]"
+                />
+              </div>
+              <div className="flex-1">
+                <label
+                  htmlFor={`extra-unit-price-${unit.key}`}
+                  className="text-sub block text-[13px] mb-1"
+                >
+                  Price
+                </label>
+                <input
+                  id={`extra-unit-price-${unit.key}`}
+                  type="number"
+                  value={unit.price}
+                  onChange={(e) =>
+                    updateExtraUnit(unit.key, { price: e.target.value })
+                  }
+                  placeholder="0"
+                  className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2 text-[15px]"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => removeExtraUnit(unit.key)}
+                aria-label={`Remove Unit "${unit.label || "unnamed"}"`}
+                className="text-danger px-1 pb-2.5 text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addExtraUnit}
+            className="text-accent text-[13px] font-semibold"
+          >
+            + Add another Unit
+          </button>
+
           <div>
             <label
               htmlFor="product-low-stock-threshold"
@@ -147,7 +305,12 @@ export default function ProductsPage() {
             <div>
               <div className="font-semibold">{p.name}</div>
               <div className="text-sub text-[13px]">
-                ₱{p.sellingPrice.toFixed(2)} · {p.quantityOnHand} in stock
+                ₱
+                {(
+                  p.units.find((u) => u.label === p.baseUnitLabel)?.price ??
+                  p.units[0].price
+                ).toFixed(2)}
+                /{p.baseUnitLabel} · {p.quantityOnHand} in stock
               </div>
             </div>
             <StockStatusPill status={p.lowStockStatus} />

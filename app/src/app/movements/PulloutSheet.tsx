@@ -91,8 +91,8 @@ export function PulloutSheet({
         key: l.movementId,
         movementId: l.movementId,
         productId: l.productId,
-        quantity: Math.abs(l.quantity),
-        originalQuantity: Math.abs(l.quantity),
+        quantity: Math.abs(l.baseAmount),
+        originalQuantity: Math.abs(l.baseAmount),
         ...(activeIds.has(l.productId)
           ? {}
           : { deletedProductName: l.productName }),
@@ -177,7 +177,7 @@ export function PulloutSheet({
         // (pullout), so reversing it adds stock back.
         deltaLines.push({
           productId: original.productId,
-          delta: -original.quantity,
+          delta: -original.baseAmount,
         });
       }
     }
@@ -203,7 +203,7 @@ export function PulloutSheet({
   const deleteOversold = findOversold(
     (existingEntry?.lines ?? []).map((l) => ({
       productId: l.productId,
-      delta: -l.quantity,
+      delta: -l.baseAmount,
     })),
     productCounts,
   ).flatMap(({ productId, projected }) => {

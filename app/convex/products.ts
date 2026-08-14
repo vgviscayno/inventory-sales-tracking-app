@@ -1,8 +1,69 @@
 import { v } from "convex/values";
+import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { filterLifecycle } from "./lifecycle";
+import { unitValidator } from "./schema";
 
 const DEFAULT_THRESHOLD = 10;
+
+/**
+ * The Unit a movement or a sale line names, looked up once here rather than
+ * every caller re-running its own `.find` — `sales.ts` and
+ * `stockMovements.ts`'s `recordMovement` both need exactly this lookup.
+ */
+export function findUnit(product: Doc<"products">, label: string) {
+  const unit = product.units.find((u) => u.label === label);
+  if (!unit) {
+    throw new Error(`"${label}" is not a Unit on "${product.name}"`);
+  }
+  return unit;
+}
+
+/**
+ * The invariants a product's Units must hold at creation — at least one, each
+ * with a non-empty, unique label and a positive price, a whole-number Base
+ * equivalent, and exactly one of them named as the Base unit with a Base
+ * equivalent of 1. No `pc` is seeded anywhere upstream of this: a plausible
+ * default is how a product ends up based in the wrong Unit — see
+ * docs/adr/0004-base-unit-locked.md.
+ */
+function validateUnits(
+  units: { label: string; baseEquivalent: number; price: number }[],
+  baseUnitLabel: string,
+) {
+  if (units.length === 0) {
+    throw new Error("A product needs at least one Unit");
+  }
+  // Case-insensitive, matching the product form's own duplicate check — "Tray"
+  // and "tray" read as the same Unit to a shopkeeper typing quickly, so the
+  // server has to refuse what the client already would.
+  const labels = new Set<string>();
+  for (const unit of units) {
+    if (!unit.label.trim()) {
+      throw new Error("A Unit needs a label");
+    }
+    const key = unit.label.trim().toLowerCase();
+    if (labels.has(key)) {
+      throw new Error(`"${unit.label}" is used by more than one Unit`);
+    }
+    labels.add(key);
+    if (!Number.isInteger(unit.baseEquivalent) || unit.baseEquivalent <= 0) {
+      throw new Error(
+        `"${unit.label}"'s Base equivalent must be a positive whole number`,
+      );
+    }
+    if (unit.price <= 0) {
+      throw new Error(`"${unit.label}" needs a positive price`);
+    }
+  }
+  const baseUnit = units.find((u) => u.label === baseUnitLabel);
+  if (!baseUnit) {
+    throw new Error(`Base unit "${baseUnitLabel}" is not one of the Units`);
+  }
+  if (baseUnit.baseEquivalent !== 1) {
+    throw new Error("The Base unit's Base equivalent must be 1");
+  }
+}
 
 /**
  * An archived product is never nagging her about restocking it — she's
@@ -76,7 +137,8 @@ export const get = query({
 export const create = mutation({
   args: {
     name: v.string(),
-    sellingPrice: v.number(),
+    units: v.array(unitValidator),
+    baseUnitLabel: v.string(),
     // Optional, defaulting to 0: the product form no longer collects a
     // starting count — delivery logging is the only way to raise one. This
     // stays an arg (rather than disappearing) for callers that legitimately
@@ -84,9 +146,12 @@ export const create = mutation({
     quantityOnHand: v.optional(v.number()),
     lowStockThreshold: v.optional(v.number()),
   },
-  handler: async (ctx, { quantityOnHand, ...args }) => {
+  handler: async (ctx, { quantityOnHand, units, baseUnitLabel, ...args }) => {
+    validateUnits(units, baseUnitLabel);
     return await ctx.db.insert("products", {
       ...args,
+      units,
+      baseUnitLabel,
       quantityOnHand: quantityOnHand ?? 0,
     });
   },
@@ -96,10 +161,11 @@ export const update = mutation({
   args: {
     id: v.id("products"),
     name: v.optional(v.string()),
-    sellingPrice: v.optional(v.number()),
-    // No `quantityOnHand` here, deliberately: it is the one field this
-    // mutation must never touch. Delivery (and pull-out) logging are the only
-    // writers of a product's count from here on — see `stockMovements.ts`.
+    // No `units`, `baseUnitLabel`, or `quantityOnHand` here, deliberately.
+    // The Base unit is locked once a product has movements (see
+    // docs/adr/0004-base-unit-locked.md); correcting or removing a Unit is a
+    // later ticket. Delivery (and pull-out) logging are the only writers of a
+    // product's count from here on — see `stockMovements.ts`.
     // null clears the per-product override back to the global default;
     // omitted leaves the existing value untouched (Convex drops `undefined`
     // args before the mutation runs, so `undefined` can't signal "clear").

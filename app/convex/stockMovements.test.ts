@@ -63,7 +63,7 @@ test("a sale row carries its line total, not the signed delta", async () => {
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
 
   const rows = await t.query(api.stockMovements.listForProduct, {
@@ -129,12 +129,13 @@ test("a backfilled opening row still sorts as the oldest, even when the backfill
   // has to read as the oldest row regardless.
   const coke = await t.mutation(api.products.create, {
     name: "Coke 1.5L",
-    sellingPrice: 75,
+    units: [{ label: "pc", baseEquivalent: 1, price: 75 }],
+    baseUnitLabel: "pc",
     quantityOnHand: 20,
   });
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   await t.mutation(internal.backfills.openingBalances, {});
 
@@ -470,7 +471,7 @@ test("editEntry rejects a sale entry — those are edited from the Register", as
 
   const saleId = await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   const [line] = (await t.query(api.sales.list, {}))[0].lines;
 
@@ -683,7 +684,7 @@ test("deleteEntry rejects a sale entry — those are deleted from the Register",
 
   const saleId = await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
 
   await expect(

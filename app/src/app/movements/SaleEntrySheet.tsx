@@ -75,7 +75,7 @@ export function SaleEntrySheet({
                   )}
                 </div>
                 <div className="text-danger shrink-0 font-bold">
-                  {signed(l.quantity)}
+                  {signed(l.unitQuantity)} {l.unitLabel}
                 </div>
               </div>
             );

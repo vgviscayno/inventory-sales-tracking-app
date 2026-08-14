@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { findOversold } from "./oversold";
+import { findUnit } from "./products";
 import { entryLines, recordMovement, saleTotal } from "./stockMovements";
 
 export const listForCustomer = query({
@@ -45,7 +46,7 @@ export const list = query({
           paymentMethod: sale.paymentMethod,
           customerName: customer?.name,
           lines,
-          netChange: lines.reduce((sum, l) => sum + l.quantity, 0),
+          netChange: lines.reduce((sum, l) => sum + l.baseAmount, 0),
           totalAmount: await saleTotal(ctx, sale._id),
         };
       }),
@@ -58,7 +59,11 @@ export const create = mutation({
     customerId: v.optional(v.id("customers")),
     paymentMethod: v.union(v.literal("cash"), v.literal("utang")),
     items: v.array(
-      v.object({ productId: v.id("products"), quantity: v.number() }),
+      v.object({
+        productId: v.id("products"),
+        unitLabel: v.string(),
+        quantity: v.number(),
+      }),
     ),
     // One flag for the whole sale, not one per line: it records the fact that a
     // human was warned and said yes, and there is one such gesture per save.
@@ -79,18 +84,19 @@ export const create = mutation({
       items.map(async (item) => {
         const product = await ctx.db.get(item.productId);
         if (!product) throw new Error("Product not found");
-        return { item, product };
+        return { item, product, unit: findUnit(product, item.unitLabel) };
       }),
     );
 
     if (!allowNegative) {
-      // Summed per product, so two lines of the same product are judged on what
-      // the sale actually takes rather than line by line — and so a product on
-      // two lines is judged once.
+      // Summed per product in Base units, so two lines of the same product —
+      // in the same Unit or different ones — are judged on what the sale
+      // actually takes off the shelf, not line by line and not in whichever
+      // Unit each line happened to be rung up in.
       const oversold = findOversold(
-        items.map((item) => ({
+        resolvedItems.map(({ item, unit }) => ({
           productId: item.productId,
-          delta: -item.quantity,
+          delta: -Math.round(item.quantity * unit.baseEquivalent),
         })),
         resolvedItems.map(({ item, product }) => ({
           productId: item.productId,
@@ -114,13 +120,14 @@ export const create = mutation({
       createdAt: Date.now(),
     });
 
-    for (const { item, product } of resolvedItems) {
+    for (const { item, unit } of resolvedItems) {
       await recordMovement(ctx, {
         type: "sale",
         refId: saleId,
         productId: item.productId,
-        quantity: item.quantity,
-        unitPriceAtSale: product.sellingPrice,
+        unitLabel: item.unitLabel,
+        unitQuantity: item.quantity,
+        unitPriceAtSale: unit.price,
       });
     }
 

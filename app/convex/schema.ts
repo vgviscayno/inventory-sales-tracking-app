@@ -1,10 +1,26 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+// A single Unit a product can be counted and transacted in — piece, tray,
+// kilo. Shared between the schema and `products.ts`'s args validators, so a
+// field added to a Unit only has to be declared once.
+export const unitValidator = v.object({
+  label: v.string(),
+  baseEquivalent: v.number(),
+  price: v.number(),
+});
+
 export default defineSchema({
   products: defineTable({
     name: v.string(),
-    sellingPrice: v.number(),
+    // Every product has at least one. `baseEquivalent` is how many Base units
+    // one of this Unit amounts to (1 for the Base unit itself, 30 for an egg
+    // tray) — see docs/adr/0003-base-unit-storage.md.
+    units: v.array(unitValidator),
+    // Which `units[].label` is this product's Base unit — recorded
+    // explicitly rather than inferred from a `baseEquivalent` of 1. Locked
+    // once the product has movements — see docs/adr/0004-base-unit-locked.md.
+    baseUnitLabel: v.string(),
     quantityOnHand: v.number(),
     lowStockThreshold: v.optional(v.number()),
     // Uniform two-state lifecycle, absent meaning active. Only `archivedAt`
@@ -78,10 +94,18 @@ export default defineSchema({
       v.union(v.id("sales"), v.id("deliveries"), v.id("pullouts")),
     ),
     productId: v.id("products"),
-    // Signed delta: +delivery/opening, -sale/pullout. `stockMovements.ts` is
+    // The Unit label the movement was entered in — "tray", not "piece" —
+    // snapshotted so a Unit removed later cannot orphan the rows that used
+    // it. Signed: +delivery/opening, -sale/pullout. `stockMovements.ts` is
     // the only module that writes this table, and the only one that decides
     // the sign — see the notes there.
-    quantity: v.number(),
+    unitLabel: v.string(),
+    unitQuantity: v.number(),
+    // Snapshot of that Unit's Base equivalent at the time of the write. The
+    // Base amount is never stored — it is derived on every read as
+    // `Math.round(unitQuantity * baseEquivalentAtEntry)`. See
+    // docs/adr/0003-base-unit-storage.md.
+    baseEquivalentAtEntry: v.number(),
     unitPriceAtSale: v.optional(v.number()), // only when type === "sale"
     reasonCategory: v.optional(v.string()), // only when type === "pullout"
     reasonNotes: v.optional(v.string()), // only when type === "pullout"

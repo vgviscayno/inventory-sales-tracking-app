@@ -108,7 +108,8 @@ test("a kind: new line creates the product and carries its quantity as the count
       {
         kind: "new",
         name: "Nissin Cup Noodles",
-        sellingPrice: 25,
+        unitLabel: "pc",
+        price: 25,
         quantity: 8,
       },
     ],
@@ -117,13 +118,14 @@ test("a kind: new line creates the product and carries its quantity as the count
   const entries = await t.query(api.deliveries.list, {});
   const entry = entries.find((e) => e._id === deliveryId);
   expect(entry?.lines).toMatchObject([
-    { productName: "Nissin Cup Noodles", quantity: 8 },
+    { productName: "Nissin Cup Noodles", baseAmount: 8 },
   ]);
 
   const products = await t.query(api.products.list, {});
   const created = products.find((p) => p.name === "Nissin Cup Noodles");
   expect(created).toMatchObject({
-    sellingPrice: 25,
+    baseUnitLabel: "pc",
+    units: [{ label: "pc", baseEquivalent: 1, price: 25 }],
     quantityOnHand: 8,
   });
   if (!created) throw new Error("Product was not created");
@@ -136,7 +138,13 @@ test("a kind: new line with no selling price is rejected", async () => {
   await expect(
     t.mutation(api.deliveries.create, {
       lines: [
-        { kind: "new", name: "No Price Item", sellingPrice: 0, quantity: 3 },
+        {
+          kind: "new",
+          name: "No Price Item",
+          unitLabel: "pc",
+          price: 0,
+          quantity: 3,
+        },
       ],
     }),
   ).rejects.toThrow();
@@ -181,7 +189,8 @@ test("a failed line leaves neither the new product nor the delivery behind", asy
         {
           kind: "new",
           name: "Rolled Back Item",
-          sellingPrice: 30,
+          unitLabel: "pc",
+          price: 30,
           quantity: 4,
         },
         { kind: "existing", productId: coke, quantity: -1 },
@@ -218,11 +227,11 @@ test("deliveries list newest first, each carrying its lines and net change", asy
   // Newest first.
   expect(entries[0].netChange).toBe(9);
   expect(entries[0].lines).toMatchObject([
-    { productName: "Coke 1.5L", quantity: 4 },
-    { productName: "Lucky Me Pancit Canton", quantity: 5 },
+    { productName: "Coke 1.5L", baseAmount: 4 },
+    { productName: "Lucky Me Pancit Canton", baseAmount: 5 },
   ]);
   expect(entries[1].netChange).toBe(12);
   expect(entries[1].lines).toMatchObject([
-    { productName: "Coke 1.5L", quantity: 12 },
+    { productName: "Coke 1.5L", baseAmount: 12 },
   ]);
 });

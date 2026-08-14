@@ -18,8 +18,8 @@ test("a sale moves its products' stock through the ledger", async () => {
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
     items: [
-      { productId: coke, quantity: 3 },
-      { productId: pancit, quantity: 2 },
+      { productId: coke, unitLabel: "pc", quantity: 3 },
+      { productId: pancit, unitLabel: "pc", quantity: 2 },
     ],
   });
 
@@ -46,8 +46,8 @@ test("a sale's total is the positive amount charged, not the negative delta", as
     customerId,
     paymentMethod: "utang",
     items: [
-      { productId: coke, quantity: 3 },
-      { productId: pancit, quantity: 2 },
+      { productId: coke, unitLabel: "pc", quantity: 3 },
+      { productId: pancit, unitLabel: "pc", quantity: 2 },
     ],
   });
 
@@ -66,8 +66,8 @@ test("the same product on two lines of one sale moves stock twice", async () => 
     customerId,
     paymentMethod: "utang",
     items: [
-      { productId: coke, quantity: 3 },
-      { productId: coke, quantity: 2 },
+      { productId: coke, unitLabel: "pc", quantity: 3 },
+      { productId: coke, unitLabel: "pc", quantity: 2 },
     ],
   });
 
@@ -87,7 +87,7 @@ test("a sale line cannot carry a negative quantity", async () => {
   await expect(
     t.mutation(api.sales.create, {
       paymentMethod: "cash",
-      items: [{ productId: coke, quantity: -3 }],
+      items: [{ productId: coke, unitLabel: "pc", quantity: -3 }],
     }),
   ).rejects.toThrow();
 
@@ -101,7 +101,7 @@ test("a sale that would drive stock negative is refused without the flag", async
   await expect(
     t.mutation(api.sales.create, {
       paymentMethod: "cash",
-      items: [{ productId: coke, quantity: 3 }],
+      items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
     }),
   ).rejects.toThrow(/Coke 1\.5L/);
 
@@ -119,8 +119,8 @@ test("the same product across two lines is refused on their sum, not per line", 
     t.mutation(api.sales.create, {
       paymentMethod: "cash",
       items: [
-        { productId: coke, quantity: 3 },
-        { productId: coke, quantity: 3 },
+        { productId: coke, unitLabel: "pc", quantity: 3 },
+        { productId: coke, unitLabel: "pc", quantity: 3 },
       ],
     }),
   ).rejects.toThrow();
@@ -137,7 +137,7 @@ test("allowNegative records the sale and lands the negative count", async () => 
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 5 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 5 }],
     allowNegative: true,
   });
 
@@ -156,14 +156,14 @@ test("a sale off an already-negative count is still refused without the flag", a
 
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 4 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 4 }],
     allowNegative: true,
   });
 
   await expect(
     t.mutation(api.sales.create, {
       paymentMethod: "cash",
-      items: [{ productId: coke, quantity: 1 }],
+      items: [{ productId: coke, unitLabel: "pc", quantity: 1 }],
     }),
   ).rejects.toThrow();
 
@@ -183,14 +183,14 @@ test("sales list newest first, each carrying its lines, net change, and customer
 
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
     items: [
-      { productId: coke, quantity: 2 },
-      { productId: pancit, quantity: 1 },
+      { productId: coke, unitLabel: "pc", quantity: 2 },
+      { productId: pancit, unitLabel: "pc", quantity: 1 },
     ],
   });
 
@@ -201,13 +201,13 @@ test("sales list newest first, each carrying its lines, net change, and customer
   expect(entries[0].netChange).toBe(-3);
   expect(entries[0].customerName).toBe("Aling Nena");
   expect(entries[0].lines).toMatchObject([
-    { productName: "Coke 1.5L", quantity: -2 },
-    { productName: "Lucky Me Pancit Canton", quantity: -1 },
+    { productName: "Coke 1.5L", unitQuantity: -2 },
+    { productName: "Lucky Me Pancit Canton", unitQuantity: -1 },
   ]);
   expect(entries[1].netChange).toBe(-3);
   expect(entries[1].customerName).toBeUndefined();
   expect(entries[1].lines).toMatchObject([
-    { productName: "Coke 1.5L", quantity: -3 },
+    { productName: "Coke 1.5L", unitQuantity: -3 },
   ]);
 });
 
@@ -219,9 +219,17 @@ test("a sale charges the price at the time, not the price today", async () => {
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 2 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 2 }],
   });
-  await t.mutation(api.products.update, { id: coke, sellingPrice: 90 });
+  // A Unit's price isn't editable through the public API yet (that lands with
+  // Unit correction — see docs/adr/0004-base-unit-locked.md's neighboring
+  // ticket), so the only way to simulate "the price changed since" today is
+  // to reach under it, the same way the cache-drift test does.
+  await t.run(async (ctx) => {
+    await ctx.db.patch(coke, {
+      units: [{ label: "pc", baseEquivalent: 1, price: 90 }],
+    });
+  });
 
   expect(
     await t.query(api.sales.listForCustomer, { customerId }),
