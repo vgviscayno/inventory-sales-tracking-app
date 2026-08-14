@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { findOversold } from "./oversold";
 import { entryLines, reasonCategory, recordMovement } from "./stockMovements";
 
 export const create = mutation({
@@ -43,26 +43,24 @@ export const create = mutation({
     if (!allowNegative) {
       // Summed per product, so two lines of the same product are judged on
       // what the pull-out actually takes rather than line by line.
-      const remainingPerProduct = new Map<
-        Id<"products">,
-        { name: string; remaining: number }
-      >();
-      for (const { line, product } of resolvedLines) {
-        const entry = remainingPerProduct.get(line.productId) ?? {
-          name: product.name,
-          remaining: product.quantityOnHand,
-        };
-        entry.remaining -= line.quantity;
-        remainingPerProduct.set(line.productId, entry);
-      }
-
-      for (const { name, remaining } of remainingPerProduct.values()) {
-        if (remaining < 0) {
-          throw new Error(
-            `This pull-out would leave "${name}" at ${remaining}. ` +
-              `Confirm the count is wrong and record it anyway to proceed.`,
-          );
-        }
+      const oversold = findOversold(
+        lines.map((line) => ({
+          productId: line.productId,
+          delta: -line.quantity,
+        })),
+        resolvedLines.map(({ line, product }) => ({
+          productId: line.productId,
+          quantityOnHand: product.quantityOnHand,
+        })),
+      );
+      for (const { productId, projected } of oversold) {
+        const name = resolvedLines.find(
+          ({ line }) => line.productId === productId,
+        )?.product.name;
+        throw new Error(
+          `This pull-out would leave "${name}" at ${projected}. ` +
+            `Confirm the count is wrong and record it anyway to proceed.`,
+        );
       }
     }
 

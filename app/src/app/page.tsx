@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { findOversold } from "../../convex/oversold";
 import { CustomerPicker } from "./CustomerPicker";
 import { StockStatusPill } from "./StockStatusPill";
 
@@ -78,7 +79,16 @@ export default function RegisterPage() {
   // Lines this sale would drive below zero. They warn — they never block. The
   // customer is at the counter holding the goods, so refusing the write buys an
   // unrecorded sale and a permanently wrong utang balance.
-  const oversold = lines.filter((l) => l.quantity > l.product.quantityOnHand);
+  const oversoldProductIds = new Set(
+    findOversold(
+      lines.map((l) => ({ productId: l.productId, delta: -l.quantity })),
+      lines.map((l) => ({
+        productId: l.productId,
+        quantityOnHand: l.product.quantityOnHand,
+      })),
+    ).map((o) => o.productId),
+  );
+  const oversold = lines.filter((l) => oversoldProductIds.has(l.productId));
   const canCheckout =
     lines.length > 0 && (paymentMethod === "cash" || customerId !== null);
 
