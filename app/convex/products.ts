@@ -139,20 +139,18 @@ export const create = mutation({
     name: v.string(),
     units: v.array(unitValidator),
     baseUnitLabel: v.string(),
-    // Optional, defaulting to 0: the product form no longer collects a
-    // starting count — delivery logging is the only way to raise one. This
-    // stays an arg (rather than disappearing) for callers that legitimately
-    // know a count up front, like the opening-balance backfill's fixtures.
-    quantityOnHand: v.optional(v.number()),
     lowStockThreshold: v.optional(v.number()),
   },
-  handler: async (ctx, { quantityOnHand, units, baseUnitLabel, ...args }) => {
+  // Always born at zero. Delivery logging is the only way to raise a count,
+  // so there is no starting number to take from a caller — and none that the
+  // ledger couldn't account for.
+  handler: async (ctx, { units, baseUnitLabel, ...args }) => {
     validateUnits(units, baseUnitLabel);
     return await ctx.db.insert("products", {
       ...args,
       units,
       baseUnitLabel,
-      quantityOnHand: quantityOnHand ?? 0,
+      quantityOnHand: 0,
     });
   },
 });

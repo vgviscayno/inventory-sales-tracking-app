@@ -27,7 +27,6 @@ const LEDGER_ROW_H = 58;
 const LEDGER_VIEWPORT_H = 420;
 
 const LEDGER_LABEL: Record<LedgerRow["type"], string> = {
-  opening: "Opening balance",
   delivery: "Delivery",
   pullout: "Pull-out",
   sale: "Sale",
@@ -330,10 +329,9 @@ type OpenEntry =
  * Every `stockMovements` row for this product, newest first under day
  * headings — the answer to "why does it say N?" sitting directly under N.
  * Reuses the Movements tab's day-grouped windowed list so a year of history
- * renders as cheaply here as it does there. A row that names a header entry
- * (anything but `opening`, which stands alone with no entry to open) is
- * tappable, and reopens that whole entry rather than just this one line —
- * an entry the ledger holds two rows for is still one correction to make.
+ * renders as cheaply here as it does there. Every row is tappable, and
+ * reopens the whole entry behind it rather than just this one line — an entry
+ * the ledger holds two rows for is still one correction to make.
  */
 function ProductLedger({
   productId,
@@ -364,18 +362,17 @@ function ProductLedger({
 }
 
 /**
- * The tap handler for one ledger row, or `undefined` for a row with no entry
- * to open — an `opening` row, which stands alone. `row.refId`'s declared type
- * spans all three header tables regardless of `row.type`; narrowing it to the
- * one table `type` actually names is a cast rather than something the schema
- * ties together, since `stockMovements`' `type` and `refId` fields are
- * validated independently (see schema.ts).
+ * The tap handler for one ledger row. Every row has an entry behind it, so
+ * every row opens something. `row.refId`'s declared type spans all three
+ * header tables regardless of `row.type`; narrowing it to the one table
+ * `type` actually names is a cast rather than something the schema ties
+ * together, since `stockMovements`' `type` and `refId` fields are validated
+ * independently (see schema.ts).
  */
 function openEntryFor(
   row: LedgerRow,
   onOpenEntry: (entry: OpenEntry) => void,
-): (() => void) | undefined {
-  if (row.type === "opening" || row.refId === undefined) return undefined;
+): () => void {
   const refId = row.refId;
   switch (row.type) {
     case "delivery":

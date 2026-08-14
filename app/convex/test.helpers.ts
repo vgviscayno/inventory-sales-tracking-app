@@ -8,7 +8,7 @@ import { expect } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema, { type unitValidator } from "./schema";
-import { deriveBaseAmount, recordOpeningBalance } from "./stockMovements";
+import { deriveBaseAmount } from "./stockMovements";
 
 // The Convex bundler leaves test files and this helper module out of the
 // deployed function set. Apply the same rule here — vite's glob has no working
@@ -33,9 +33,15 @@ type UnitOverride = Infer<typeof unitValidator>;
 
 /**
  * A product created through the public mutation, holding `quantityOnHand` —
- * with the opening movement that accounts for it, so the product satisfies
- * `expectCacheMatchesLedger` from birth. `quantityOnHand` is positional
- * because it is the point of the fixture; `overrides` covers everything else.
+ * stocked the only way production can stock one, by logging a delivery for
+ * it, so the product satisfies `expectCacheMatchesLedger` from birth.
+ * `quantityOnHand` is positional because it is the point of the fixture;
+ * `overrides` covers everything else.
+ *
+ * The delivery is denominated in the product's Base unit, so the count asked
+ * for is the count arrived at whatever the other Units say. A zero holding
+ * logs nothing: a delivery line must be positive, and a product born at zero
+ * with an empty ledger already reconciles.
  *
  * Defaults to a single Unit ("pc") so existing tests stay short and can keep
  * passing `sellingPrice` as a flat number. Pass `units` (and, if it isn't the
@@ -60,19 +66,13 @@ export async function aProductHolding(
     name: name ?? "Coke 1.5L",
     units: resolvedUnits,
     baseUnitLabel: baseUnitLabel ?? resolvedUnits[0].label,
-    quantityOnHand,
   });
 
-  // `products.create` still sets a count directly, so nothing in the create
-  // path writes the opening row that accounts for it. This is the same helper
-  // the backfill runs over every product, called on the one just made — the
-  // fixture stays on the real code path without depending on a one-off
-  // mutation that is meant to be deleted once it has run everywhere.
-  await t.run(async (ctx) => {
-    const product = await ctx.db.get(productId);
-    if (!product) throw new Error(`No product with id ${productId}`);
-    await recordOpeningBalance(ctx, product);
-  });
+  if (quantityOnHand !== 0) {
+    await t.mutation(api.deliveries.create, {
+      lines: [{ kind: "existing", productId, quantity: quantityOnHand }],
+    });
+  }
 
   return productId;
 }

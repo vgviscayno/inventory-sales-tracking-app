@@ -86,17 +86,15 @@ export default defineSchema({
       v.literal("sale"),
       v.literal("delivery"),
       v.literal("pullout"),
-      v.literal("opening"),
     ),
-    // The header this row belongs to; undefined for "opening" rows, which
-    // stand alone.
-    refId: v.optional(
-      v.union(v.id("sales"), v.id("deliveries"), v.id("pullouts")),
-    ),
+    // The header this row belongs to. Required: a product's stock only ever
+    // arrives or leaves through a delivery, sale, or pull-out, so every row
+    // has an entry behind it that the ledger can open.
+    refId: v.union(v.id("sales"), v.id("deliveries"), v.id("pullouts")),
     productId: v.id("products"),
     // The Unit label the movement was entered in — "tray", not "piece" —
     // snapshotted so a Unit removed later cannot orphan the rows that used
-    // it. Signed: +delivery/opening, -sale/pullout. `stockMovements.ts` is
+    // it. Signed: +delivery, -sale/pullout. `stockMovements.ts` is
     // the only module that writes this table, and the only one that decides
     // the sign — see the notes there.
     unitLabel: v.string(),

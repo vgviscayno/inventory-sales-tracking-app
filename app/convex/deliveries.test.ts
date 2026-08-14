@@ -181,7 +181,9 @@ test("a delivery line's shape is enforced by the union validator, not a hand-rol
 
 test("a failed line leaves neither the new product nor the delivery behind", async () => {
   const t = setupTest();
-  const coke = await aProductHolding(t, 20);
+  // Held at zero so the only delivery this test could see is the one it tries
+  // (and fails) to log — a stocked fixture would log one of its own.
+  const coke = await aProductHolding(t, 0);
 
   await expect(
     t.mutation(api.deliveries.create, {
@@ -206,8 +208,10 @@ test("a failed line leaves neither the new product nor the delivery behind", asy
 
 test("deliveries list newest first, each carrying its lines and net change", async () => {
   const t = setupTest();
-  const coke = await aProductHolding(t, 20, { name: "Coke 1.5L" });
-  const pancit = await aProductHolding(t, 10, {
+  // Both held at zero: this test counts deliveries, and a stocked fixture
+  // logs one of its own that would sit in the list beside them.
+  const coke = await aProductHolding(t, 0, { name: "Coke 1.5L" });
+  const pancit = await aProductHolding(t, 0, {
     name: "Lucky Me Pancit Canton",
   });
 
