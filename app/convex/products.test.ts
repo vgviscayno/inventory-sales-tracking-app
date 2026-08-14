@@ -16,7 +16,7 @@ test("a product created through the mutation reads back through the query", asyn
 
   expect(await t.query(api.products.get, { id })).toMatchObject({
     name: "Lucky Me Pancit Canton",
-    sellingPrice: 15,
+    units: [{ label: "pc", baseEquivalent: 1, price: 15 }],
     quantityOnHand: 24,
     lowStockStatus: "ok",
   });
@@ -27,7 +27,8 @@ test("creating a product without a quantity starts it at zero", async () => {
 
   const id = await t.mutation(api.products.create, {
     name: "New Product",
-    sellingPrice: 20,
+    units: [{ label: "pc", baseEquivalent: 1, price: 20 }],
+    baseUnitLabel: "pc",
   });
 
   expect(await t.query(api.products.get, { id })).toMatchObject({
@@ -71,7 +72,7 @@ test("a negative count reads as negative, not merely low", async () => {
 
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: id, quantity: 5 }],
+    items: [{ productId: id, unitLabel: "pc", quantity: 5 }],
     allowNegative: true,
   });
 
@@ -178,7 +179,7 @@ test("deleting an archived product with a negative count is refused", async () =
   const id = await aProductHolding(t, 2);
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: id, quantity: 5 }],
+    items: [{ productId: id, unitLabel: "pc", quantity: 5 }],
     allowNegative: true,
   });
   await t.mutation(api.products.archive, { id });
@@ -193,7 +194,7 @@ test("deleting a product touches neither its cached count nor the ledger, and it
   const id = await aProductHolding(t, 3, { name: "Ghost SKU" });
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: id, quantity: 3 }],
+    items: [{ productId: id, unitLabel: "pc", quantity: 3 }],
   });
   await t.mutation(api.products.archive, { id });
 
@@ -215,7 +216,13 @@ test("the ghost-product cleanup path: a mis-typed inline delivery product is dro
   const deliveryId = await t.mutation(api.deliveries.create, {
     lines: [
       { kind: "existing", productId: realId, quantity: 10 },
-      { kind: "new", name: "Cok 1.5L (typo)", sellingPrice: 75, quantity: 5 },
+      {
+        kind: "new",
+        name: "Cok 1.5L (typo)",
+        unitLabel: "pc",
+        price: 75,
+        quantity: 5,
+      },
     ],
   });
 

@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { entryLines, recordMovement } from "./stockMovements";
 
@@ -18,7 +19,12 @@ export const create = mutation({
         v.object({
           kind: v.literal("new"),
           name: v.string(),
-          sellingPrice: v.number(),
+          // The single Unit this quick-created product starts with — its
+          // Base unit. No default is offered here either (see
+          // docs/adr/0004-base-unit-locked.md): a plausible-looking one is
+          // how a product ends up based in the wrong Unit.
+          unitLabel: v.string(),
+          price: v.number(),
           quantity: v.number(),
         }),
       ),
@@ -35,8 +41,13 @@ export const create = mutation({
       if (line.quantity <= 0) {
         throw new Error("Each delivery line must have a positive quantity");
       }
-      if (line.kind === "new" && line.sellingPrice <= 0) {
-        throw new Error("A new product needs a positive selling price");
+      if (line.kind === "new") {
+        if (!line.unitLabel.trim()) {
+          throw new Error("A new product needs a Unit label");
+        }
+        if (line.price <= 0) {
+          throw new Error("A new product needs a positive price");
+        }
       }
     }
 
@@ -51,19 +62,28 @@ export const create = mutation({
     // inside the same mutation as the delivery it arrived on, so the two
     // either land together or (on any failure) neither does.
     for (const line of lines) {
-      const productId =
-        line.kind === "existing"
-          ? line.productId
-          : await ctx.db.insert("products", {
-              name: line.name,
-              sellingPrice: line.sellingPrice,
-              quantityOnHand: 0,
-            });
+      let productId: Id<"products">;
+      let unitLabel: string;
+      if (line.kind === "existing") {
+        productId = line.productId;
+        const product = await ctx.db.get(productId);
+        if (!product) throw new Error("Product not found");
+        unitLabel = product.baseUnitLabel;
+      } else {
+        unitLabel = line.unitLabel;
+        productId = await ctx.db.insert("products", {
+          name: line.name,
+          units: [{ label: unitLabel, baseEquivalent: 1, price: line.price }],
+          baseUnitLabel: unitLabel,
+          quantityOnHand: 0,
+        });
+      }
       await recordMovement(ctx, {
         type: "delivery",
         refId: deliveryId,
         productId,
-        quantity: line.quantity,
+        unitLabel,
+        unitQuantity: line.quantity,
       });
     }
 
@@ -88,7 +108,7 @@ export const list = query({
           _id: delivery._id,
           createdAt: delivery.createdAt,
           lines,
-          netChange: lines.reduce((sum, l) => sum + l.quantity, 0),
+          netChange: lines.reduce((sum, l) => sum + l.baseAmount, 0),
         };
       }),
     );

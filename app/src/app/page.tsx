@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { roundCentavos } from "../../convex/money";
 import { findOversold } from "../../convex/oversold";
 import { CustomerPicker } from "./CustomerPicker";
 import { StockStatusPill } from "./StockStatusPill";
@@ -14,9 +15,15 @@ import { StockStatusPill } from "./StockStatusPill";
  * warning is judged against the count as it stands now, not as it stood when
  * the item was tapped. A stale count is what would let a sale reach the server
  * unwarned, get refused, and strand her at the counter.
+ *
+ * Keyed by `(productId, unitLabel)`, not `productId` alone — trays and pieces
+ * of the same egg are separately countable and separately priced, so tapping
+ * a product already in the cart under a different Unit has to open a new
+ * line rather than pile onto the existing one.
  */
 type CartLine = {
   productId: Id<"products">;
+  unitLabel: string;
   quantity: number;
 };
 
@@ -43,52 +50,81 @@ export default function RegisterPage() {
   // cart changes, so consent never carries over to a sale she has not seen.
   const [warned, setWarned] = useState(false);
 
-  function addToCart(product: (typeof products)[number]) {
+  function addToCart(
+    product: (typeof products)[number],
+    unit: (typeof products)[number]["units"][number],
+  ) {
     setWarned(false);
     setCart((prev) => {
-      const existing = prev.find((l) => l.productId === product._id);
+      const existing = prev.find(
+        (l) => l.productId === product._id && l.unitLabel === unit.label,
+      );
       if (existing) {
         return prev.map((l) =>
-          l.productId === product._id ? { ...l, quantity: l.quantity + 1 } : l,
+          l.productId === product._id && l.unitLabel === unit.label
+            ? { ...l, quantity: l.quantity + 1 }
+            : l,
         );
       }
-      return [...prev, { productId: product._id, quantity: 1 }];
+      return [
+        ...prev,
+        { productId: product._id, unitLabel: unit.label, quantity: 1 },
+      ];
     });
   }
 
-  function setQuantity(productId: Id<"products">, quantity: number) {
+  function setQuantity(
+    productId: Id<"products">,
+    unitLabel: string,
+    quantity: number,
+  ) {
     setWarned(false);
     setCart((prev) =>
       quantity <= 0
-        ? prev.filter((l) => l.productId !== productId)
-        : prev.map((l) => (l.productId === productId ? { ...l, quantity } : l)),
+        ? prev.filter(
+            (l) => !(l.productId === productId && l.unitLabel === unitLabel),
+          )
+        : prev.map((l) =>
+            l.productId === productId && l.unitLabel === unitLabel
+              ? { ...l, quantity }
+              : l,
+          ),
     );
   }
 
-  // Each cart line joined to the product as it stands right now. A product
-  // deleted mid-sale drops out of both the display and the save.
+  // Each cart line joined to the product and the specific Unit it was rung up
+  // in, as they stand right now. A product deleted mid-sale, or a Unit
+  // dropped from it, drops the line from both the display and the save.
   const lines = cart.flatMap((line) => {
     const product = allProducts.find((p) => p._id === line.productId);
-    return product ? [{ ...line, product }] : [];
+    const unit = product?.units.find((u) => u.label === line.unitLabel);
+    return product && unit ? [{ ...line, product, unit }] : [];
   });
 
   const total = lines.reduce(
-    (sum, l) => sum + l.product.sellingPrice * l.quantity,
+    (sum, l) => sum + roundCentavos(l.unit.price * l.quantity),
     0,
   );
-  // Lines this sale would drive below zero. They warn — they never block. The
-  // customer is at the counter holding the goods, so refusing the write buys an
-  // unrecorded sale and a permanently wrong utang balance.
-  const oversoldProductIds = new Set(
-    findOversold(
-      lines.map((l) => ({ productId: l.productId, delta: -l.quantity })),
-      lines.map((l) => ({
-        productId: l.productId,
-        quantityOnHand: l.product.quantityOnHand,
-      })),
-    ).map((o) => o.productId),
-  );
-  const oversold = lines.filter((l) => oversoldProductIds.has(l.productId));
+  // Lines this sale would drive below zero, netted per product in Base units
+  // — two lines of one product, in the same Unit or different ones, are
+  // judged on what the sale actually takes off the shelf. They warn — they
+  // never block. The customer is at the counter holding the goods, so
+  // refusing the write buys an unrecorded sale and a permanently wrong utang
+  // balance.
+  const oversold = findOversold(
+    lines.map((l) => ({
+      productId: l.productId,
+      delta: -Math.round(l.quantity * l.unit.baseEquivalent),
+    })),
+    lines.map((l) => ({
+      productId: l.productId,
+      quantityOnHand: l.product.quantityOnHand,
+    })),
+  ).flatMap(({ productId, projected }) => {
+    const product = allProducts.find((p) => p._id === productId);
+    return product ? [{ productId, product, projected }] : [];
+  });
+  const oversoldProductIds = new Set(oversold.map((o) => o.productId));
   const canCheckout =
     lines.length > 0 && (paymentMethod === "cash" || customerId !== null);
 
@@ -116,6 +152,7 @@ export default function RegisterPage() {
         paymentMethod,
         items: lines.map((l) => ({
           productId: l.productId,
+          unitLabel: l.unitLabel,
           quantity: l.quantity,
         })),
         allowNegative: warned,
@@ -148,28 +185,76 @@ export default function RegisterPage() {
         />
         <div className="grid grid-cols-2 gap-2">
           {products.map((p) => {
-            const inCart = cart.find((l) => l.productId === p._id);
+            const cartLinesForProduct = cart.filter(
+              (l) => l.productId === p._id,
+            );
+            // A single-Unit product taps as a whole tile, same as before
+            // Units existed. A multi-Unit product — eggs sold by the piece
+            // and by the tray — needs each Unit picked explicitly, so it
+            // renders one small button per Unit instead.
+            if (p.units.length === 1) {
+              const unit = p.units[0];
+              const inCart = cartLinesForProduct[0];
+              return (
+                <button
+                  key={p._id}
+                  type="button"
+                  onClick={() => addToCart(p, unit)}
+                  className={`card relative p-3 text-left ${inCart ? "border-accent" : ""}`}
+                >
+                  <div className="text-sm font-semibold">{p.name}</div>
+                  <div className="text-sub text-[13px]">
+                    ₱{unit.price.toFixed(2)} · {p.quantityOnHand} left
+                  </div>
+                  <StockStatusPill
+                    status={p.lowStockStatus}
+                    className="mt-1 inline-block"
+                  />
+                  {inCart && (
+                    <span className="absolute top-2 right-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-accent-ink">
+                      {inCart.quantity}
+                    </span>
+                  )}
+                </button>
+              );
+            }
             return (
-              <button
-                key={p._id}
-                type="button"
-                onClick={() => addToCart(p)}
-                className={`card relative p-3 text-left ${inCart ? "border-accent" : ""}`}
-              >
+              <div key={p._id} className="card p-3 text-left">
                 <div className="text-sm font-semibold">{p.name}</div>
                 <div className="text-sub text-[13px]">
-                  ₱{p.sellingPrice.toFixed(2)} · {p.quantityOnHand} left
+                  {p.quantityOnHand} left
                 </div>
                 <StockStatusPill
                   status={p.lowStockStatus}
-                  className="mt-1 inline-block"
+                  className="mt-1 mb-1.5 inline-block"
                 />
-                {inCart && (
-                  <span className="absolute top-2 right-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-accent-ink">
-                    {inCart.quantity}
-                  </span>
-                )}
-              </button>
+                <div className="flex flex-wrap gap-1.5">
+                  {p.units.map((unit) => {
+                    const inCart = cartLinesForProduct.find(
+                      (l) => l.unitLabel === unit.label,
+                    );
+                    return (
+                      <button
+                        key={unit.label}
+                        type="button"
+                        onClick={() => addToCart(p, unit)}
+                        className={`relative rounded-lg border px-2 py-1 text-[12px] font-semibold ${
+                          inCart
+                            ? "border-accent bg-accent/10"
+                            : "border-line bg-card"
+                        }`}
+                      >
+                        {unit.label} · ₱{unit.price.toFixed(2)}
+                        {inCart && (
+                          <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-ink">
+                            {inCart.quantity}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             );
           })}
           {products.length === 0 && (
@@ -215,15 +300,20 @@ export default function RegisterPage() {
             <div className="space-y-2">
               {lines.map((l) => (
                 <div
-                  key={l.productId}
+                  key={`${l.productId}:${l.unitLabel}`}
                   className="flex items-center justify-between gap-2"
                 >
                   <div>
-                    <div>{l.product.name}</div>
-                    <div className="text-sub text-[13px]">
-                      ₱{l.product.sellingPrice.toFixed(2)} each
+                    <div>
+                      {l.product.name}
+                      {l.product.units.length > 1 && (
+                        <span className="text-sub"> · {l.unitLabel}</span>
+                      )}
                     </div>
-                    {l.quantity > l.product.quantityOnHand && (
+                    <div className="text-sub text-[13px]">
+                      ₱{l.unit.price.toFixed(2)} each
+                    </div>
+                    {oversoldProductIds.has(l.productId) && (
                       <div className="text-danger text-xs">
                         Only {l.product.quantityOnHand} on hand
                       </div>
@@ -232,7 +322,9 @@ export default function RegisterPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setQuantity(l.productId, l.quantity - 1)}
+                      onClick={() =>
+                        setQuantity(l.productId, l.unitLabel, l.quantity - 1)
+                      }
                       className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
                     >
                       −
@@ -242,7 +334,9 @@ export default function RegisterPage() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => setQuantity(l.productId, l.quantity + 1)}
+                      onClick={() =>
+                        setQuantity(l.productId, l.unitLabel, l.quantity + 1)
+                      }
                       className="h-[30px] w-[30px] rounded-lg border border-line bg-card"
                     >
                       +
@@ -300,12 +394,11 @@ export default function RegisterPage() {
                   This will take stock below zero
                 </p>
                 <ul className="mt-1 space-y-0.5 text-[13px]">
-                  {oversold.map((l) => (
-                    <li key={l.productId}>
-                      <span className="font-semibold">{l.product.name}</span> —
-                      only {l.product.quantityOnHand} on hand, selling{" "}
-                      {l.quantity} (leaves{" "}
-                      {l.product.quantityOnHand - l.quantity})
+                  {oversold.map(({ productId, product, projected }) => (
+                    <li key={productId}>
+                      <span className="font-semibold">{product.name}</span> —
+                      only {product.quantityOnHand} on hand, this sale leaves{" "}
+                      {projected}
                     </li>
                   ))}
                 </ul>

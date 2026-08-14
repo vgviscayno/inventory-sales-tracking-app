@@ -68,12 +68,13 @@ export const create = mutation({
       createdAt: Date.now(),
     });
 
-    for (const { line } of resolvedLines) {
+    for (const { line, product } of resolvedLines) {
       await recordMovement(ctx, {
         type: "pullout",
         refId: pulloutId,
         productId: line.productId,
-        quantity: line.quantity,
+        unitLabel: product.baseUnitLabel,
+        unitQuantity: line.quantity,
         reasonCategory,
         reasonNotes,
       });
@@ -108,7 +109,7 @@ export const list = query({
           reasonCategory: firstMovement?.reasonCategory ?? "other",
           reasonNotes: firstMovement?.reasonNotes,
           lines,
-          netChange: lines.reduce((sum, l) => sum + l.quantity, 0),
+          netChange: lines.reduce((sum, l) => sum + l.baseAmount, 0),
         };
       }),
     );

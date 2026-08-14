@@ -52,7 +52,8 @@ type Line =
       kind: "new";
       key: string;
       name: string;
-      sellingPrice: string;
+      unitLabel: string;
+      price: string;
       quantity: number;
     };
 
@@ -112,8 +113,8 @@ export function DeliverySheet({
               key: l.movementId,
               movementId: l.movementId,
               productId: l.productId,
-              quantity: l.quantity,
-              originalQuantity: l.quantity,
+              quantity: l.baseAmount,
+              originalQuantity: l.baseAmount,
             }
           : {
               kind: "deleted" as const,
@@ -121,8 +122,8 @@ export function DeliverySheet({
               movementId: l.movementId,
               productId: l.productId,
               productName: l.productName,
-              quantity: l.quantity,
-              originalQuantity: l.quantity,
+              quantity: l.baseAmount,
+              originalQuantity: l.baseAmount,
             },
       ),
     );
@@ -161,7 +162,8 @@ export function DeliverySheet({
         kind: "new",
         key: `new:${Date.now()}`,
         name,
-        sellingPrice: "",
+        unitLabel: "",
+        price: "",
         quantity: 1,
       },
     ]);
@@ -184,10 +186,18 @@ export function DeliverySheet({
     );
   }
 
-  function setNewProductSellingPrice(key: string, sellingPrice: string) {
+  function setNewProductUnitLabel(key: string, unitLabel: string) {
     setLines((prev) =>
       prev.map((l) =>
-        l.key === key && l.kind === "new" ? { ...l, sellingPrice } : l,
+        l.key === key && l.kind === "new" ? { ...l, unitLabel } : l,
+      ),
+    );
+  }
+
+  function setNewProductPrice(key: string, price: string) {
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key === key && l.kind === "new" ? { ...l, price } : l,
       ),
     );
   }
@@ -233,7 +243,7 @@ export function DeliverySheet({
       if (!stillPresent.has(original.movementId)) {
         deltaLines.push({
           productId: original.productId,
-          delta: -original.quantity,
+          delta: -original.baseAmount,
         });
       }
     }
@@ -259,7 +269,7 @@ export function DeliverySheet({
   const deleteOversold = findOversold(
     (existingEntry?.lines ?? []).map((l) => ({
       productId: l.productId,
-      delta: -l.quantity,
+      delta: -l.baseAmount,
     })),
     productCounts,
   ).flatMap(({ productId, projected }) => {
@@ -277,7 +287,7 @@ export function DeliverySheet({
         (l) =>
           l.kind === "existing" ||
           l.kind === "deleted" ||
-          Number(l.sellingPrice) > 0,
+          (l.unitLabel.trim().length > 0 && Number(l.price) > 0),
       ));
 
   useEffect(() => {
@@ -358,7 +368,8 @@ export function DeliverySheet({
                 : {
                     kind: "new",
                     name: l.name,
-                    sellingPrice: Number(l.sellingPrice),
+                    unitLabel: l.unitLabel.trim(),
+                    price: Number(l.price),
                     quantity: l.quantity,
                   },
             ),
@@ -505,17 +516,29 @@ export function DeliverySheet({
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {l.kind === "new" && (
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      value={l.sellingPrice}
-                      onChange={(e) =>
-                        setNewProductSellingPrice(l.key, e.target.value)
-                      }
-                      placeholder="Price"
-                      aria-label={`Selling price for ${l.name}`}
-                      className="w-16 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
-                    />
+                    <>
+                      <input
+                        type="text"
+                        value={l.unitLabel}
+                        onChange={(e) =>
+                          setNewProductUnitLabel(l.key, e.target.value)
+                        }
+                        placeholder="Base unit"
+                        aria-label={`Base unit for ${l.name}`}
+                        className="w-20 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+                      />
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={l.price}
+                        onChange={(e) =>
+                          setNewProductPrice(l.key, e.target.value)
+                        }
+                        placeholder="Price"
+                        aria-label={`Price for ${l.name}`}
+                        className="w-16 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+                      />
+                    </>
                   )}
                   <button
                     type="button"

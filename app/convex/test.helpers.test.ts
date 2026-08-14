@@ -12,7 +12,7 @@ test("the invariant holds when the ledger sums to the cached count", async () =>
 
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId, quantity: 8 }],
+    items: [{ productId, unitLabel: "pc", quantity: 8 }],
   });
 
   await expectCacheMatchesLedger(t, productId);

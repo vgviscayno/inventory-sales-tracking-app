@@ -188,8 +188,8 @@ test("pull-outs list newest first, each carrying its lines, reason, and net chan
     netChange: -7,
   });
   expect(entries[0].lines).toMatchObject([
-    { productName: "Coke 1.5L", quantity: -2 },
-    { productName: "Lucky Me Pancit Canton", quantity: -5 },
+    { productName: "Coke 1.5L", baseAmount: -2 },
+    { productName: "Lucky Me Pancit Canton", baseAmount: -5 },
   ]);
   expect(entries[1]).toMatchObject({
     reasonCategory: "personal use",

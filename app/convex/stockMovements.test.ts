@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { api, internal } from "./_generated/api";
+import { api } from "./_generated/api";
 import {
   aCustomer,
   aProductHolding,
@@ -28,7 +28,7 @@ test("an archived product's name still renders on its own ledger and on past del
   expect(ledger.length).toBeGreaterThan(0);
 });
 
-test("the opening row is the oldest row, and the newest row's running balance equals quantityOnHand", async () => {
+test("the ledger runs oldest to newest, and the newest row's running balance equals quantityOnHand", async () => {
   const t = setupTest();
   const coke = await aProductHolding(t, 20);
 
@@ -48,7 +48,8 @@ test("the opening row is the oldest row, and the newest row's running balance eq
   // Newest first.
   expect(rows[0].type).toBe("pullout");
   expect(rows[1].type).toBe("delivery");
-  expect(rows[2].type).toBe("opening");
+  // The delivery the fixture stocked the product with.
+  expect(rows[2].type).toBe("delivery");
 
   const product = await t.query(api.products.get, { id: coke });
   expect(rows[0].runningBalance).toBe(product?.quantityOnHand);
@@ -63,7 +64,7 @@ test("a sale row carries its line total, not the signed delta", async () => {
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
 
   const rows = await t.query(api.stockMovements.listForProduct, {
@@ -119,33 +120,6 @@ test("running balance accumulates oldest to newest, in a mixed sequence", async 
 
   // Newest first: +3 delivery (10), -8 pullout (7), +5 delivery (15), opening (10).
   expect(rows.map((r) => r.runningBalance)).toEqual([10, 7, 15, 10]);
-});
-
-test("a backfilled opening row still sorts as the oldest, even when the backfill runs after other movements", async () => {
-  const t = setupTest();
-
-  // A product created directly with a count and sold from before the backfill
-  // ever ran — its opening row is written after the sale's `createdAt`, but
-  // has to read as the oldest row regardless.
-  const coke = await t.mutation(api.products.create, {
-    name: "Coke 1.5L",
-    sellingPrice: 75,
-    quantityOnHand: 20,
-  });
-  await t.mutation(api.sales.create, {
-    paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
-  });
-  await t.mutation(internal.backfills.openingBalances, {});
-
-  const rows = await t.query(api.stockMovements.listForProduct, {
-    productId: coke,
-  });
-
-  expect(rows).toHaveLength(2);
-  expect(rows[0].type).toBe("sale");
-  expect(rows[1].type).toBe("opening");
-  await expectCacheMatchesLedger(t, coke);
 });
 
 test("editEntry moves a delivery product's count by exactly the difference, in either direction", async () => {
@@ -470,7 +444,7 @@ test("editEntry rejects a sale entry — those are edited from the Register", as
 
   const saleId = await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
   const [line] = (await t.query(api.sales.list, {}))[0].lines;
 
@@ -683,7 +657,7 @@ test("deleteEntry rejects a sale entry — those are deleted from the Register",
 
   const saleId = await t.mutation(api.sales.create, {
     paymentMethod: "cash",
-    items: [{ productId: coke, quantity: 3 }],
+    items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
 
   await expect(

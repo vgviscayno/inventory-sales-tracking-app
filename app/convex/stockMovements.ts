@@ -1,12 +1,14 @@
 import { v } from "convex/values";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Id } from "./_generated/dataModel";
 import {
   type MutationCtx,
   mutation,
   type QueryCtx,
   query,
 } from "./_generated/server";
+import { roundCentavos } from "./money";
 import { findOversold } from "./oversold";
+import { findUnit } from "./products";
 
 // The fixed reason set for a pull-out. Lives here — not in pullouts.ts — so
 // both `pullouts.create` and `stockMovements.editEntry` (which patches the
@@ -25,11 +27,9 @@ export const reasonCategory = v.union(
  * as a signed delta so every cache update is a plain add with no per-type
  * branching — but that sign is redundant with the `type` sitting beside it, and
  * a schema comment is not what stops a positive pull-out. This table is. It is
- * the only place in the codebase that knows which way a type moves stock.
- *
- * `opening` is absent because it is not a movement: it states a count that
- * already exists rather than changing one, so it carries its own sign and goes
- * through `recordOpeningBalance` below.
+ * the only place in the codebase that knows which way a type moves stock, and
+ * every row in the ledger goes through it — there is no second write path that
+ * sets a count without moving it.
  */
 const DIRECTION = {
   delivery: 1,
@@ -54,9 +54,26 @@ type MovementDetails =
 
 type Movement = MovementDetails & {
   productId: Id<"products">;
-  /** How many units moved — a magnitude, never signed. */
-  quantity: number;
+  // The Unit this movement was entered in — must name one of the product's
+  // `units`. `recordMovement` resolves it to find the Base equivalent to
+  // snapshot, so no caller has to look that up itself.
+  unitLabel: string;
+  /** How many of that Unit moved — a magnitude, never signed. */
+  unitQuantity: number;
 };
+
+/**
+ * The Base amount a row's snapshot comes to — never stored, derived on every
+ * read (docs/adr/0003-base-unit-storage.md). Rounded so the float noise from
+ * a decimal Unit quantity (`1.7 * 1000` !== `1700`) never re-enters
+ * `quantityOnHand`, which is written back rather than recomputed each time.
+ */
+export function deriveBaseAmount(m: {
+  unitQuantity: number;
+  baseEquivalentAtEntry: number;
+}): number {
+  return Math.round(m.unitQuantity * m.baseEquivalentAtEntry);
+}
 
 /**
  * Write one movement and move the product's cached count with it. The two
@@ -64,83 +81,37 @@ type Movement = MovementDetails & {
  * gets to do one without the other.
  */
 export async function recordMovement(ctx: MutationCtx, movement: Movement) {
-  if (movement.quantity < 0) {
+  if (movement.unitQuantity < 0) {
     throw new Error(
-      `A ${movement.type} movement takes a magnitude, not a signed quantity (got ${movement.quantity})`,
+      `A ${movement.type} movement takes a magnitude, not a signed quantity (got ${movement.unitQuantity})`,
     );
   }
 
   const product = await ctx.db.get(movement.productId);
   if (!product) throw new Error("Product not found");
+  const unit = findUnit(product, movement.unitLabel);
 
-  const delta = DIRECTION[movement.type] * movement.quantity;
+  const signedUnitQuantity = DIRECTION[movement.type] * movement.unitQuantity;
+  const baseDelta =
+    DIRECTION[movement.type] *
+    Math.round(movement.unitQuantity * unit.baseEquivalent);
 
   await ctx.db.insert("stockMovements", {
     ...movement,
-    quantity: delta,
+    unitQuantity: signedUnitQuantity,
+    baseEquivalentAtEntry: unit.baseEquivalent,
     createdAt: Date.now(),
   });
   await ctx.db.patch(movement.productId, {
-    quantityOnHand: product.quantityOnHand + delta,
+    quantityOnHand: product.quantityOnHand + baseDelta,
   });
-}
-
-/**
- * The one ledger write that does not move stock. An opening row says where a
- * product's count came from, so — unlike `recordMovement` — it leaves
- * `quantityOnHand` untouched: the cache is already the number this row exists
- * to account for, and adding to it would double the product's stock.
- *
- * The quantity is the cache *minus what the ledger already explains*, which is
- * the count the product started with. On the run this was written for the
- * ledger is empty and that is simply `quantityOnHand`. It stops being simply
- * that for a product created after an earlier run and sold from before the
- * next one: opening such a product at today's count would count those sales
- * twice and leave the cache disagreeing with its own rows.
- *
- * The guard is per product rather than "bail if any opening row exists
- * anywhere", so that later-created product still picks its row up.
- *
- * @returns whether a row was written, i.e. false if the product already had one
- */
-export async function recordOpeningBalance(
-  ctx: MutationCtx,
-  product: Doc<"products">,
-) {
-  const movements = await ctx.db
-    .query("stockMovements")
-    .withIndex("by_product", (q) => q.eq("productId", product._id))
-    .collect();
-
-  if (movements.some((m) => m.type === "opening")) return false;
-
-  const alreadyExplained = movements.reduce((sum, m) => sum + m.quantity, 0);
-
-  // An opening row explains what came before every other row for this
-  // product, which is a fact about the ledger's story, not about when the
-  // backfill happened to run. Stamping it with `Date.now()` would place it
-  // after any movement recorded before the backfill ran — the ledger's oldest
-  // row landing last in a chronological read. Backdating it to just before
-  // the earliest existing movement (or now, if there are none) keeps it first
-  // regardless of when this actually runs.
-  const earliestExisting = movements.reduce(
-    (min, m) => Math.min(min, m.createdAt),
-    Date.now(),
-  );
-
-  await ctx.db.insert("stockMovements", {
-    type: "opening",
-    productId: product._id,
-    quantity: product.quantityOnHand - alreadyExplained,
-    createdAt: movements.length > 0 ? earliestExisting - 1 : earliestExisting,
-  });
-  return true;
 }
 
 /**
  * What a sale charged, derived from its ledger rows rather than stored. Sale
- * quantities are negative, so the line amounts are subtracted to land back on a
- * positive total.
+ * quantities are negative, so the line amounts are subtracted to land back on
+ * a positive total. Each line rounds to centavos before it joins the sum, so
+ * a receipt's printed lines visibly add up to its printed total.
  */
 export async function saleTotal(ctx: QueryCtx, saleId: Id<"sales">) {
   const movements = await ctx.db
@@ -153,14 +124,14 @@ export async function saleTotal(ctx: QueryCtx, saleId: Id<"sales">) {
     if (m.unitPriceAtSale === undefined) {
       throw new Error(`Sale movement ${m._id} has no unitPriceAtSale`);
     }
-    return total - m.quantity * m.unitPriceAtSale;
+    return total + roundCentavos(-m.unitQuantity * m.unitPriceAtSale);
   }, 0);
 }
 
 /**
  * The per-product ledger the product detail page reads: every movement that
- * ever changed — or, for `opening`, stated — this product's count, newest
- * first, each carrying the running balance immediately after it. That
+ * ever changed this product's count, newest first, each carrying the running
+ * balance immediately after it. That
  * balance is why this is computed oldest-first internally and reversed for
  * return rather than walked backwards from `quantityOnHand`: a backwards walk
  * would silently agree with a cache that had drifted from its own ledger,
@@ -192,7 +163,9 @@ export const listForProduct = query({
     // reading whatever the counter had reached by the time its own lookup
     // resolved rather than the value at its own turn.
     let runningBalance = 0;
-    const balances = oldestFirst.map((m) => (runningBalance += m.quantity));
+    const balances = oldestFirst.map(
+      (m) => (runningBalance += deriveBaseAmount(m)),
+    );
 
     const rows = await Promise.all(
       oldestFirst.map(async (m, i) => {
@@ -211,15 +184,20 @@ export const listForProduct = query({
         return {
           _id: m._id,
           type: m.type,
-          // Undefined for `opening` rows, which have no header entry to open —
-          // the ledger row itself is the whole story for those.
+          // Always set — every row belongs to an entry the ledger can open.
           refId: m.refId,
           createdAt: m.createdAt,
-          netChange: m.quantity,
+          // Base-denominated, signed — what the running balance is folded
+          // from. `unitLabel`/`unitQuantity` below are what the row reads
+          // back as ("2 trays"), which is not the same figure once the Unit
+          // isn't the Base unit.
+          netChange: deriveBaseAmount(m),
           runningBalance: balances[i],
+          unitLabel: m.unitLabel,
+          unitQuantity: m.unitQuantity,
           lineTotal:
             m.type === "sale" && m.unitPriceAtSale !== undefined
-              ? -m.quantity * m.unitPriceAtSale
+              ? roundCentavos(-m.unitQuantity * m.unitPriceAtSale)
               : undefined,
           reasonCategory: m.reasonCategory,
           reasonNotes: m.reasonNotes,
@@ -255,7 +233,15 @@ export async function entryLines(
         movementId: m._id,
         productId: m.productId,
         productName: product?.name ?? "Deleted product",
-        quantity: m.quantity,
+        // Signed, in the Unit the line was actually entered in — what lets a
+        // sale read back as "2 trays" rather than "60 pieces". Never called
+        // `quantity` on its own (see CONTEXT.md's Unit-quantity glossary
+        // entry): every other fold over the ledger has to work in Base
+        // amounts, so `baseAmount` is derived here too rather than making
+        // each caller re-derive it from `unitLabel`/`unitQuantity` by hand.
+        unitLabel: m.unitLabel,
+        unitQuantity: m.unitQuantity,
+        baseAmount: deriveBaseAmount(m),
       };
     }),
   );
@@ -411,7 +397,7 @@ export const editEntry = mutation({
         if (movement) {
           deltaLines.push({
             productId: line.productId,
-            delta: newSigned - movement.quantity,
+            delta: newSigned - deriveBaseAmount(movement),
           });
         }
       } else {
@@ -422,7 +408,7 @@ export const editEntry = mutation({
       if (!referencedIds.has(movement._id)) {
         deltaLines.push({
           productId: movement.productId,
-          delta: -movement.quantity,
+          delta: -deriveBaseAmount(movement),
         });
       }
     }
@@ -456,7 +442,7 @@ export const editEntry = mutation({
       const product = await ctx.db.get(movement.productId);
       if (!product) throw new Error("Product not found");
       await ctx.db.patch(movement.productId, {
-        quantityOnHand: product.quantityOnHand - movement.quantity,
+        quantityOnHand: product.quantityOnHand - deriveBaseAmount(movement),
       });
       await ctx.db.delete(movement._id);
     }
@@ -464,12 +450,15 @@ export const editEntry = mutation({
     // Existing lines that survive: patch the quantity (a no-op delta when
     // unchanged) and, for a pull-out, the reason — which lives once per entry
     // but is stored on every row, so a reason edit has to reach all of them.
+    // Delivery and pull-out lines ride the product's Base unit throughout, so
+    // the stored `unitQuantity` is patched straight to the new signed amount
+    // — `baseEquivalentAtEntry` (already 1) never needs touching.
     for (const line of lines) {
       if (!line.movementId) continue;
       const movement = existingById.get(line.movementId);
       if (!movement) continue;
       const newSigned = DIRECTION[entry.type] * line.quantity;
-      const diff = newSigned - movement.quantity;
+      const diff = newSigned - deriveBaseAmount(movement);
       if (diff !== 0) {
         const product = await ctx.db.get(line.productId);
         if (!product) throw new Error("Product not found");
@@ -478,20 +467,25 @@ export const editEntry = mutation({
         });
       }
       await ctx.db.patch(movement._id, {
-        quantity: newSigned,
+        unitQuantity: newSigned,
         ...(entry.type === "pullout" ? { reasonCategory, reasonNotes } : {}),
       });
     }
 
-    // New lines: insert and move stock, same as a fresh entry.
+    // New lines: insert and move stock, same as a fresh entry. Both entry
+    // types ride the product's Base unit (their own Unit pickers arrive in
+    // later tickets), so the Unit is always the product's own.
     for (const line of lines) {
       if (line.movementId) continue;
+      const product = await ctx.db.get(line.productId);
+      if (!product) throw new Error("Product not found");
       if (entry.type === "pullout") {
         await recordMovement(ctx, {
           type: "pullout",
           refId: entry.entryId,
           productId: line.productId,
-          quantity: line.quantity,
+          unitLabel: product.baseUnitLabel,
+          unitQuantity: line.quantity,
           reasonCategory: reasonCategory as string,
           reasonNotes,
         });
@@ -500,7 +494,8 @@ export const editEntry = mutation({
           type: "delivery",
           refId: entry.entryId,
           productId: line.productId,
-          quantity: line.quantity,
+          unitLabel: product.baseUnitLabel,
+          unitQuantity: line.quantity,
         });
       }
     }
@@ -545,7 +540,7 @@ export const deleteEntry = mutation({
     if (!allowNegative) {
       const deltaLines = existing.map((movement) => ({
         productId: movement.productId,
-        delta: -movement.quantity,
+        delta: -deriveBaseAmount(movement),
       }));
       // Checked one product at a time, in the order it was first touched, so a
       // product missing further down the entry can't shadow an earlier one's
@@ -573,7 +568,7 @@ export const deleteEntry = mutation({
       const product = await ctx.db.get(movement.productId);
       if (!product) throw new Error("Product not found");
       await ctx.db.patch(movement.productId, {
-        quantityOnHand: product.quantityOnHand - movement.quantity,
+        quantityOnHand: product.quantityOnHand - deriveBaseAmount(movement),
       });
       await ctx.db.delete(movement._id);
     }
