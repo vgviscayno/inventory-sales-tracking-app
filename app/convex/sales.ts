@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { findOversold } from "./oversold";
 import { entryLines, recordMovement, saleTotal } from "./stockMovements";
 
 export const listForCustomer = query({
@@ -87,26 +87,24 @@ export const create = mutation({
       // Summed per product, so two lines of the same product are judged on what
       // the sale actually takes rather than line by line — and so a product on
       // two lines is judged once.
-      const remainingPerProduct = new Map<
-        Id<"products">,
-        { name: string; remaining: number }
-      >();
-      for (const { item, product } of resolvedItems) {
-        const entry = remainingPerProduct.get(item.productId) ?? {
-          name: product.name,
-          remaining: product.quantityOnHand,
-        };
-        entry.remaining -= item.quantity;
-        remainingPerProduct.set(item.productId, entry);
-      }
-
-      for (const { name, remaining } of remainingPerProduct.values()) {
-        if (remaining < 0) {
-          throw new Error(
-            `This sale would leave "${name}" at ${remaining}. ` +
-              `Confirm the count is wrong and record it anyway to proceed.`,
-          );
-        }
+      const oversold = findOversold(
+        items.map((item) => ({
+          productId: item.productId,
+          delta: -item.quantity,
+        })),
+        resolvedItems.map(({ item, product }) => ({
+          productId: item.productId,
+          quantityOnHand: product.quantityOnHand,
+        })),
+      );
+      for (const { productId, projected } of oversold) {
+        const name = resolvedItems.find(
+          ({ item }) => item.productId === productId,
+        )?.product.name;
+        throw new Error(
+          `This sale would leave "${name}" at ${projected}. ` +
+            `Confirm the count is wrong and record it anyway to proceed.`,
+        );
       }
     }
 

@@ -6,6 +6,7 @@ import {
   type QueryCtx,
   query,
 } from "./_generated/server";
+import { findOversold } from "./oversold";
 
 // The fixed reason set for a pull-out. Lives here — not in pullouts.ts — so
 // both `pullouts.create` and `stockMovements.editEntry` (which patches the
@@ -402,36 +403,47 @@ export const editEntry = mutation({
     // writing anything, so the negative-stock check sees the whole entry —
     // including a product touched by two lines, or a line dropped alongside
     // one raised — the way the diff will actually leave it, not line by line.
-    const netDeltaByProduct = new Map<Id<"products">, number>();
-    const bump = (productId: Id<"products">, delta: number) =>
-      netDeltaByProduct.set(
-        productId,
-        (netDeltaByProduct.get(productId) ?? 0) + delta,
-      );
-
+    const deltaLines: { productId: Id<"products">; delta: number }[] = [];
     for (const line of lines) {
       const newSigned = DIRECTION[entry.type] * line.quantity;
       if (line.movementId) {
         const movement = existingById.get(line.movementId);
-        if (movement) bump(line.productId, newSigned - movement.quantity);
+        if (movement) {
+          deltaLines.push({
+            productId: line.productId,
+            delta: newSigned - movement.quantity,
+          });
+        }
       } else {
-        bump(line.productId, newSigned);
+        deltaLines.push({ productId: line.productId, delta: newSigned });
       }
     }
     for (const movement of existing) {
       if (!referencedIds.has(movement._id)) {
-        bump(movement.productId, -movement.quantity);
+        deltaLines.push({
+          productId: movement.productId,
+          delta: -movement.quantity,
+        });
       }
     }
 
     if (!allowNegative) {
-      for (const [productId, delta] of netDeltaByProduct) {
+      // Checked one product at a time, in the order it was first touched, so a
+      // product missing further down the entry can't shadow an earlier one's
+      // oversold error with the wrong message.
+      const touchedProductIds = [
+        ...new Set(deltaLines.map((l) => l.productId)),
+      ];
+      for (const productId of touchedProductIds) {
         const product = await ctx.db.get(productId);
         if (!product) throw new Error("Product not found");
-        const projected = product.quantityOnHand + delta;
-        if (projected < 0) {
+        const oversold = findOversold(
+          deltaLines.filter((l) => l.productId === productId),
+          [{ productId: product._id, quantityOnHand: product.quantityOnHand }],
+        );
+        if (oversold.length > 0) {
           throw new Error(
-            `This edit would leave "${product.name}" at ${projected}. ` +
+            `This edit would leave "${product.name}" at ${oversold[0].projected}. ` +
               `Confirm the count is wrong and record it anyway to proceed.`,
           );
         }
@@ -531,20 +543,26 @@ export const deleteEntry = mutation({
     }
 
     if (!allowNegative) {
-      const netDeltaByProduct = new Map<Id<"products">, number>();
-      for (const movement of existing) {
-        netDeltaByProduct.set(
-          movement.productId,
-          (netDeltaByProduct.get(movement.productId) ?? 0) - movement.quantity,
-        );
-      }
-      for (const [productId, delta] of netDeltaByProduct) {
+      const deltaLines = existing.map((movement) => ({
+        productId: movement.productId,
+        delta: -movement.quantity,
+      }));
+      // Checked one product at a time, in the order it was first touched, so a
+      // product missing further down the entry can't shadow an earlier one's
+      // oversold error with the wrong message.
+      const touchedProductIds = [
+        ...new Set(deltaLines.map((l) => l.productId)),
+      ];
+      for (const productId of touchedProductIds) {
         const product = await ctx.db.get(productId);
         if (!product) throw new Error("Product not found");
-        const projected = product.quantityOnHand + delta;
-        if (projected < 0) {
+        const oversold = findOversold(
+          deltaLines.filter((l) => l.productId === productId),
+          [{ productId: product._id, quantityOnHand: product.quantityOnHand }],
+        );
+        if (oversold.length > 0) {
           throw new Error(
-            `Deleting this entry would leave "${product.name}" at ${projected}. ` +
+            `Deleting this entry would leave "${product.name}" at ${oversold[0].projected}. ` +
               `Confirm the count is wrong and delete it anyway to proceed.`,
           );
         }

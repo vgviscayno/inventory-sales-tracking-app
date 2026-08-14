@@ -13,6 +13,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { findOversold } from "../../../convex/oversold";
 
 // `key` is the movement's own id when this line was prefilled from an entry
 // under edit, so two lines touching the same product stay distinct rather
@@ -159,18 +160,12 @@ export function PulloutSheet({
   // every line there is new. Editing is what can turn a raised or added line
   // into a bigger loss of stock than the count already reflects, so this is
   // what the warning below is judged against, not the raw quantity typed.
-  const netDeltaByProduct = new Map<Id<"products">, number>();
-  const bumpNetDelta = (productId: Id<"products">, delta: number) =>
-    netDeltaByProduct.set(
-      productId,
-      (netDeltaByProduct.get(productId) ?? 0) + delta,
-    );
-
+  const deltaLines: { productId: Id<"products">; delta: number }[] = [];
   for (const line of resolvedLines) {
-    bumpNetDelta(
-      line.productId,
-      -(line.quantity - (line.originalQuantity ?? 0)),
-    );
+    deltaLines.push({
+      productId: line.productId,
+      delta: -(line.quantity - (line.originalQuantity ?? 0)),
+    });
   }
   if (existingEntry) {
     const stillPresent = new Set(
@@ -180,17 +175,23 @@ export function PulloutSheet({
       if (!stillPresent.has(original.movementId)) {
         // A dropped line reverses its own delta; it was already negative
         // (pullout), so reversing it adds stock back.
-        bumpNetDelta(original.productId, -original.quantity);
+        deltaLines.push({
+          productId: original.productId,
+          delta: -original.quantity,
+        });
       }
     }
   }
 
-  const oversold = [...netDeltaByProduct.entries()].flatMap(
-    ([productId, delta]) => {
+  const productCounts = allProducts.map((p) => ({
+    productId: p._id,
+    quantityOnHand: p.quantityOnHand,
+  }));
+
+  const oversold = findOversold(deltaLines, productCounts).flatMap(
+    ({ productId, projected }) => {
       const product = allProducts.find((p) => p._id === productId);
-      if (!product) return [];
-      const projected = product.quantityOnHand + delta;
-      return projected < 0 ? [{ productId, product, projected }] : [];
+      return product ? [{ productId, product, projected }] : [];
     },
   );
 
@@ -199,21 +200,16 @@ export function PulloutSheet({
   // than from any unsaved edits in `lines`: deleting discards those edits
   // along with the entry, so it has to warn about the entry that will
   // actually be gone.
-  const deleteNetDeltaByProduct = new Map<Id<"products">, number>();
-  for (const l of existingEntry?.lines ?? []) {
-    deleteNetDeltaByProduct.set(
-      l.productId,
-      (deleteNetDeltaByProduct.get(l.productId) ?? 0) - l.quantity,
-    );
-  }
-  const deleteOversold = [...deleteNetDeltaByProduct.entries()].flatMap(
-    ([productId, delta]) => {
-      const product = allProducts.find((p) => p._id === productId);
-      if (!product) return [];
-      const projected = product.quantityOnHand + delta;
-      return projected < 0 ? [{ productId, product, projected }] : [];
-    },
-  );
+  const deleteOversold = findOversold(
+    (existingEntry?.lines ?? []).map((l) => ({
+      productId: l.productId,
+      delta: -l.quantity,
+    })),
+    productCounts,
+  ).flatMap(({ productId, projected }) => {
+    const product = allProducts.find((p) => p._id === productId);
+    return product ? [{ productId, product, projected }] : [];
+  });
 
   const editableLines = resolvedLines.filter((l) => !l.deleted);
   const isDeleteViaEmptySave = isEditing && editableLines.length === 0;
