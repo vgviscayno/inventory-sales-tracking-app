@@ -190,8 +190,10 @@ export default function RegisterPage() {
             );
             // A single-Unit product taps as a whole tile, same as before
             // Units existed. A multi-Unit product — eggs sold by the piece
-            // and by the tray — needs each Unit picked explicitly, so it
-            // renders one small button per Unit instead.
+            // and by the tray — still taps as a whole tile for its Default
+            // unit (the common case, one tap), with its other Units offered
+            // as small buttons underneath for the times she means one of
+            // those instead.
             if (p.units.length === 1) {
               const unit = p.units[0];
               const inCart = cartLinesForProduct[0];
@@ -218,18 +220,35 @@ export default function RegisterPage() {
                 </button>
               );
             }
+            const otherUnits = p.units.filter(
+              (u) => u.label !== p.defaultUnit.label,
+            );
+            const inCartDefault = cartLinesForProduct.find(
+              (l) => l.unitLabel === p.defaultUnit.label,
+            );
             return (
               <div key={p._id} className="card p-3 text-left">
-                <div className="text-sm font-semibold">{p.name}</div>
-                <div className="text-sub text-[13px]">
-                  {p.quantityOnHand} left
-                </div>
+                <button
+                  type="button"
+                  onClick={() => addToCart(p, p.defaultUnit)}
+                  className="relative block w-full text-left"
+                >
+                  <div className="text-sm font-semibold">{p.name}</div>
+                  <div className="text-sub text-[13px]">
+                    ₱{p.defaultUnit.price.toFixed(2)} · {p.quantityOnHand} left
+                  </div>
+                  {inCartDefault && (
+                    <span className="absolute top-0 right-0 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-accent-ink">
+                      {inCartDefault.quantity}
+                    </span>
+                  )}
+                </button>
                 <StockStatusPill
                   status={p.lowStockStatus}
                   className="mt-1 mb-1.5 inline-block"
                 />
                 <div className="flex flex-wrap gap-1.5">
-                  {p.units.map((unit) => {
+                  {otherUnits.map((unit) => {
                     const inCart = cartLinesForProduct.find(
                       (l) => l.unitLabel === unit.label,
                     );

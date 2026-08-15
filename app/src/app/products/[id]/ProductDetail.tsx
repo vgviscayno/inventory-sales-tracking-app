@@ -53,6 +53,12 @@ function ProductForm({ product }: { product: Product }) {
   const deleteProduct = useMutation(api.products.remove);
 
   const [name, setName] = useState(product.name);
+  // Only tracked for a multi-Unit product — a single-Unit one has nothing to
+  // choose (its one Unit is already both Base and Default), so it never gets
+  // offered the picker below, and this stays null.
+  const [defaultUnitLabel, setDefaultUnitLabel] = useState<string | null>(
+    product.units.length > 1 ? product.defaultUnit.label : null,
+  );
   const [lowStockThreshold, setLowStockThreshold] = useState(
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "",
   );
@@ -93,6 +99,7 @@ function ProductForm({ product }: { product: Product }) {
     await updateProduct({
       id: product._id,
       name: name.trim(),
+      ...(defaultUnitLabel !== null ? { defaultUnitLabel } : {}),
       lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
     });
     setSaving(false);
@@ -164,16 +171,34 @@ function ProductForm({ product }: { product: Product }) {
         </Link>
         <div>
           <div className="text-sub block text-[13px] mb-1">Units</div>
+          {product.units.length > 1 && (
+            <p className="text-sub text-[13px] mb-1.5">
+              Default unit — the one its listed price is quoted in and the
+              Register preselects.
+            </p>
+          )}
           <div className="space-y-1">
             {product.units.map((unit) => (
               <div
                 key={unit.label}
                 className="flex items-center justify-between rounded-lg border border-line px-2.5 py-2 text-[14px]"
               >
-                <span>
+                <span className="flex items-center gap-1.5">
+                  {product.units.length > 1 && (
+                    <input
+                      type="radio"
+                      name="default-unit"
+                      checked={defaultUnitLabel === unit.label}
+                      onChange={() => setDefaultUnitLabel(unit.label)}
+                      aria-label={`Make "${unit.label}" the Default unit`}
+                    />
+                  )}
                   {unit.label}
                   {unit.label === product.baseUnitLabel && (
                     <span className="pill archived ml-1.5">Base</span>
+                  )}
+                  {defaultUnitLabel === unit.label && (
+                    <span className="pill new ml-1.5">Default</span>
                   )}
                   {unit.baseEquivalent !== 1 && (
                     <span className="text-sub">
