@@ -65,6 +65,21 @@ function validateUnits(
   }
 }
 
+/** The Default unit is optional, but if named it has to be a real Unit. */
+function validateDefaultUnit(
+  units: { label: string }[],
+  defaultUnitLabel: string | null | undefined,
+) {
+  if (
+    defaultUnitLabel != null &&
+    !units.some((u) => u.label === defaultUnitLabel)
+  ) {
+    throw new Error(
+      `Default unit "${defaultUnitLabel}" is not one of the Units`,
+    );
+  }
+}
+
 /**
  * An archived product is never nagging her about restocking it — she's
  * decided she isn't restocking it, that's what archiving means — so it
@@ -78,10 +93,20 @@ function withStatus<
     quantityOnHand: number;
     lowStockThreshold?: number;
     archivedAt?: number;
+    units: { label: string; baseEquivalent: number; price: number }[];
+    baseUnitLabel: string;
+    defaultUnitLabel?: string;
   },
 >(product: T, globalThreshold: number) {
+  // Resolved once here rather than by every reader (the Register grid, the
+  // products list row, the product edit page) so "unset falls back to the
+  // Base unit" has exactly one place it's decided.
+  const defaultUnit =
+    product.units.find(
+      (u) => u.label === (product.defaultUnitLabel ?? product.baseUnitLabel),
+    ) ?? product.units[0];
   if (product.archivedAt !== undefined) {
-    return { ...product, lowStockStatus: undefined };
+    return { ...product, lowStockStatus: undefined, defaultUnit };
   }
   const threshold = product.lowStockThreshold ?? globalThreshold;
   const lowStockStatus =
@@ -90,7 +115,7 @@ function withStatus<
       : product.quantityOnHand <= threshold
         ? ("low" as const)
         : ("ok" as const);
-  return { ...product, lowStockStatus };
+  return { ...product, lowStockStatus, defaultUnit };
 }
 
 export const list = query({
@@ -139,17 +164,20 @@ export const create = mutation({
     name: v.string(),
     units: v.array(unitValidator),
     baseUnitLabel: v.string(),
+    defaultUnitLabel: v.optional(v.string()),
     lowStockThreshold: v.optional(v.number()),
   },
   // Always born at zero. Delivery logging is the only way to raise a count,
   // so there is no starting number to take from a caller — and none that the
   // ledger couldn't account for.
-  handler: async (ctx, { units, baseUnitLabel, ...args }) => {
+  handler: async (ctx, { units, baseUnitLabel, defaultUnitLabel, ...args }) => {
     validateUnits(units, baseUnitLabel);
+    validateDefaultUnit(units, defaultUnitLabel);
     return await ctx.db.insert("products", {
       ...args,
       units,
       baseUnitLabel,
+      defaultUnitLabel,
       quantityOnHand: 0,
     });
   },
@@ -164,14 +192,31 @@ export const update = mutation({
     // docs/adr/0004-base-unit-locked.md); correcting or removing a Unit is a
     // later ticket. Delivery (and pull-out) logging are the only writers of a
     // product's count from here on — see `stockMovements.ts`.
+    // The Default unit carries no such lock — it's a display/preselection
+    // choice, not a ledger unit, so it's free to change at any time. null
+    // clears it back to "unset" (falls back to the Base unit); omitted
+    // leaves the existing value untouched (Convex drops `undefined` args
+    // before the mutation runs, so `undefined` can't signal "clear").
+    defaultUnitLabel: v.optional(v.union(v.string(), v.null())),
     // null clears the per-product override back to the global default;
     // omitted leaves the existing value untouched (Convex drops `undefined`
     // args before the mutation runs, so `undefined` can't signal "clear").
     lowStockThreshold: v.optional(v.union(v.number(), v.null())),
   },
-  handler: async (ctx, { id, lowStockThreshold, ...patch }) => {
+  handler: async (
+    ctx,
+    { id, defaultUnitLabel, lowStockThreshold, ...patch },
+  ) => {
+    if (defaultUnitLabel !== undefined) {
+      const product = await ctx.db.get(id);
+      if (!product) throw new Error("Product not found");
+      validateDefaultUnit(product.units, defaultUnitLabel);
+    }
     await ctx.db.patch(id, {
       ...patch,
+      ...(defaultUnitLabel !== undefined
+        ? { defaultUnitLabel: defaultUnitLabel ?? undefined }
+        : {}),
       ...(lowStockThreshold !== undefined
         ? { lowStockThreshold: lowStockThreshold ?? undefined }
         : {}),
