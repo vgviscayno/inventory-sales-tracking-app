@@ -152,10 +152,19 @@ export const get = query({
     const product = await ctx.db.get(id);
     if (!product) return null;
     const settings = await ctx.db.query("appSettings").first();
-    return withStatus(
-      product,
-      settings?.lowStockThreshold ?? DEFAULT_THRESHOLD,
-    );
+    // Whether the product has any movement at all — not the same as a nonzero
+    // count, since a delivery and a matching sale net back to zero. It's what
+    // locks the Base unit (ADR-0004), so the edit form reads it to disable the
+    // Base radio rather than letting her try a reassignment the mutation will
+    // only refuse.
+    const firstMovement = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_product", (q) => q.eq("productId", id))
+      .first();
+    return {
+      ...withStatus(product, settings?.lowStockThreshold ?? DEFAULT_THRESHOLD),
+      hasMovements: firstMovement !== null,
+    };
   },
 });
 
@@ -187,16 +196,22 @@ export const update = mutation({
   args: {
     id: v.id("products"),
     name: v.optional(v.string()),
-    // No `units`, `baseUnitLabel`, or `quantityOnHand` here, deliberately.
-    // The Base unit is locked once a product has movements (see
-    // docs/adr/0004-base-unit-locked.md); correcting or removing a Unit is a
-    // later ticket. Delivery (and pull-out) logging are the only writers of a
-    // product's count from here on — see `stockMovements.ts`.
-    // The Default unit carries no such lock — it's a display/preselection
-    // choice, not a ledger unit, so it's free to change at any time. null
-    // clears it back to "unset" (falls back to the Base unit); omitted
-    // leaves the existing value untouched (Convex drops `undefined` args
-    // before the mutation runs, so `undefined` can't signal "clear").
+    // The Unit list and the Base unit marker. Correcting a Unit's price or
+    // Base equivalent, adding a Unit, and removing a non-Base one are all
+    // ordinary edits — the per-row snapshot (docs/adr/0003-base-unit-storage.md)
+    // is what keeps them from touching a single past movement. Two rules ride
+    // along, both enforced below: the Base unit may never leave the list, and
+    // it may be reassigned only while the product has no movements
+    // (docs/adr/0004-base-unit-locked.md). `quantityOnHand` stays out —
+    // delivery and pull-out logging are its only writers (see
+    // `stockMovements.ts`).
+    units: v.optional(v.array(unitValidator)),
+    baseUnitLabel: v.optional(v.string()),
+    // The Default unit carries no lock — it's a display/preselection choice,
+    // not a ledger unit, so it's free to change at any time. null clears it
+    // back to "unset" (falls back to the Base unit); omitted leaves the
+    // existing value untouched (Convex drops `undefined` args before the
+    // mutation runs, so `undefined` can't signal "clear").
     defaultUnitLabel: v.optional(v.union(v.string(), v.null())),
     // null clears the per-product override back to the global default;
     // omitted leaves the existing value untouched (Convex drops `undefined`
@@ -205,22 +220,79 @@ export const update = mutation({
   },
   handler: async (
     ctx,
-    { id, defaultUnitLabel, lowStockThreshold, ...patch },
+    { id, name, units, baseUnitLabel, defaultUnitLabel, lowStockThreshold },
   ) => {
-    if (defaultUnitLabel !== undefined) {
+    const patch: {
+      name?: string;
+      units?: typeof units;
+      baseUnitLabel?: string;
+      defaultUnitLabel?: string;
+      lowStockThreshold?: number;
+    } = {};
+    if (name !== undefined) patch.name = name;
+    if (lowStockThreshold !== undefined) {
+      patch.lowStockThreshold = lowStockThreshold ?? undefined;
+    }
+
+    const touchesUnits = units !== undefined || baseUnitLabel !== undefined;
+    if (touchesUnits || defaultUnitLabel !== undefined) {
       const product = await ctx.db.get(id);
       if (!product) throw new Error("Product not found");
-      validateDefaultUnit(product.units, defaultUnitLabel);
+
+      // Whatever half the caller left out stays as it is, so the invariants
+      // below are always checked against the product's *resulting* state.
+      const nextUnits = units ?? product.units;
+      const nextBaseUnitLabel = baseUnitLabel ?? product.baseUnitLabel;
+
+      if (touchesUnits) {
+        // Rejects an empty list, a duplicate or blank label, a non-whole or
+        // non-positive Base equivalent or price, and — the removal guard — a
+        // Base unit that isn't present among the Units.
+        validateUnits(nextUnits, nextBaseUnitLabel);
+
+        // The Base unit is locked once movements exist: reinterpreting a
+        // count denominated in the old Base against a new one is silent
+        // corruption, and every past row's snapshot was taken against the old
+        // Base too (ADR-0004). Before any movements there is nothing to
+        // reinterpret, so reassignment is free.
+        if (
+          baseUnitLabel !== undefined &&
+          baseUnitLabel !== product.baseUnitLabel
+        ) {
+          const firstMovement = await ctx.db
+            .query("stockMovements")
+            .withIndex("by_product", (q) => q.eq("productId", id))
+            .first();
+          if (firstMovement) {
+            throw new Error(
+              `"${product.name}"'s Base unit is locked because it already has recorded movements — ` +
+                "reassigning it would silently reinterpret every past count. " +
+                "To base the product on a different Unit, archive it and recreate it.",
+            );
+          }
+        }
+
+        patch.units = nextUnits;
+        patch.baseUnitLabel = nextBaseUnitLabel;
+      }
+
+      // The Default unit: an explicit value is validated against the resulting
+      // Unit list and wins. Otherwise, if the stored Default was one of the
+      // Units just removed, clear it so the product falls back to leading with
+      // its Base unit (see `withStatus`) rather than pointing at a Unit that's
+      // gone.
+      if (defaultUnitLabel !== undefined) {
+        validateDefaultUnit(nextUnits, defaultUnitLabel);
+        patch.defaultUnitLabel = defaultUnitLabel ?? undefined;
+      } else if (
+        product.defaultUnitLabel !== undefined &&
+        !nextUnits.some((u) => u.label === product.defaultUnitLabel)
+      ) {
+        patch.defaultUnitLabel = undefined;
+      }
     }
-    await ctx.db.patch(id, {
-      ...patch,
-      ...(defaultUnitLabel !== undefined
-        ? { defaultUnitLabel: defaultUnitLabel ?? undefined }
-        : {}),
-      ...(lowStockThreshold !== undefined
-        ? { lowStockThreshold: lowStockThreshold ?? undefined }
-        : {}),
-    });
+
+    await ctx.db.patch(id, patch);
   },
 });
 
