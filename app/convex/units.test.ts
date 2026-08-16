@@ -273,16 +273,13 @@ test("changing a Unit's Base equivalent does not change what past movements came
     items: [{ productId: eggs, unitLabel: "tray", quantity: 1 }],
   });
 
-  // Redefine a tray from 30 pieces to 12 — a change no public mutation makes
-  // yet (Unit correction is a later ticket), reached under the API the same
-  // way the cache-drift test does.
-  await t.run(async (ctx) => {
-    await ctx.db.patch(eggs, {
-      units: [
-        { label: "piece", baseEquivalent: 1, price: 8 },
-        { label: "tray", baseEquivalent: 12, price: 220 },
-      ],
-    });
+  // Redefine a tray from 30 pieces to 12 through the public correction path.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [
+      { label: "piece", baseEquivalent: 1, price: 8 },
+      { label: "tray", baseEquivalent: 12, price: 220 },
+    ],
   });
 
   const ledger = await t.query(api.stockMovements.listForProduct, {

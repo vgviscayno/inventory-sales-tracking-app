@@ -358,3 +358,240 @@ test("updating a product refuses a Default unit label not among its Units", asyn
     defaultUnit: { label: "piece" },
   });
 });
+
+// --- Correcting and removing a product's Units (INV-44) ---
+
+test("correcting a Unit's price leaves past sales at the price they were rung up at", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 60, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "tray", quantity: 2 }],
+  });
+
+  // The tray goes up from ₱220 to ₱250 — a price rise, not a migration.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [
+      { label: "piece", baseEquivalent: 1, price: 8 },
+      { label: "tray", baseEquivalent: 30, price: 250 },
+    ],
+  });
+
+  expect((await t.query(api.products.get, { id: eggs }))?.units).toContainEqual(
+    { label: "tray", baseEquivalent: 30, price: 250 },
+  );
+  // The sale already rung up holds its ₱440 — priced off the snapshot, not the
+  // Unit's live price.
+  const [sale] = await t.query(api.sales.list, {});
+  expect(sale.totalAmount).toBe(440);
+});
+
+test("correcting a Unit's Base equivalent does not resize past movements — the snapshot holds", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 60, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "tray", quantity: 1 }],
+  });
+
+  // A tray was first recorded as 30, corrected to 12.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [
+      { label: "piece", baseEquivalent: 1, price: 8 },
+      { label: "tray", baseEquivalent: 12, price: 220 },
+    ],
+  });
+
+  const ledger = await t.query(api.stockMovements.listForProduct, {
+    productId: eggs,
+  });
+  // The already-recorded tray sale still reads as -30 pieces, not -12, and the
+  // cache is untouched by the correction.
+  expect(ledger[0]).toMatchObject({ unitLabel: "tray", netChange: -30 });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 30,
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("a Unit can be added to a product that already has history", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 60, {
+    name: "Eggs",
+    units: [{ label: "piece", baseEquivalent: 1, price: 8 }],
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "piece", quantity: 5 }],
+  });
+
+  // She starts selling eggs by the tray without needing a new product.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: EGGS_UNITS,
+  });
+
+  expect((await t.query(api.products.get, { id: eggs }))?.units).toHaveLength(
+    2,
+  );
+  // And the new Unit is immediately usable.
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "tray", quantity: 1 }],
+  });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 25, // 60 - 5 - 30
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("a non-Base Unit can be removed, and movements recorded under it still read back under its original label", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 100, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "tray", quantity: 1 }],
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [{ label: "piece", baseEquivalent: 1, price: 8 }],
+  });
+
+  expect((await t.query(api.products.get, { id: eggs }))?.units).toHaveLength(
+    1,
+  );
+  const ledger = await t.query(api.stockMovements.listForProduct, {
+    productId: eggs,
+  });
+  // The tray sale keeps reading as a tray, off its snapshot, though the Unit is
+  // gone from the product.
+  expect(ledger[0]).toMatchObject({ unitLabel: "tray", netChange: -30 });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("removing the Unit that was the Default leaves the product leading with its Base unit", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.products.update, { id: eggs, defaultUnitLabel: "tray" });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [{ label: "piece", baseEquivalent: 1, price: 8 }],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    defaultUnit: { label: "piece" },
+  });
+});
+
+test("removing the Base unit is refused", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await expect(
+    t.mutation(api.products.update, {
+      id: eggs,
+      units: [{ label: "tray", baseEquivalent: 30, price: 220 }],
+    }),
+  ).rejects.toThrow();
+
+  expect((await t.query(api.products.get, { id: eggs }))?.units).toHaveLength(
+    2,
+  );
+});
+
+test("reassigning the Base unit succeeds while the product has no movements", async () => {
+  const t = setupTest();
+  // Created based in kilos, no stock logged yet — the wrong-Base-unit fix is
+  // free until the first movement.
+  const rice = await aProductHolding(t, 0, {
+    name: "Rice",
+    units: [{ label: "kg", baseEquivalent: 1, price: 75 }],
+    baseUnitLabel: "kg",
+  });
+
+  await t.mutation(api.products.update, {
+    id: rice,
+    units: [
+      { label: "g", baseEquivalent: 1, price: 0.075 },
+      { label: "kg", baseEquivalent: 1000, price: 75 },
+    ],
+    baseUnitLabel: "g",
+  });
+
+  expect(await t.query(api.products.get, { id: rice })).toMatchObject({
+    baseUnitLabel: "g",
+  });
+});
+
+test("reassigning the Base unit is refused once the product has movements, with a message pointing at archiving and recreating", async () => {
+  const t = setupTest();
+  // A delivery has been logged, so a movement exists.
+  const rice = await aProductHolding(t, 50, {
+    name: "Rice",
+    units: [{ label: "kg", baseEquivalent: 1, price: 75 }],
+    baseUnitLabel: "kg",
+  });
+
+  await expect(
+    t.mutation(api.products.update, {
+      id: rice,
+      units: [
+        { label: "g", baseEquivalent: 1, price: 0.075 },
+        { label: "kg", baseEquivalent: 1000, price: 75 },
+      ],
+      baseUnitLabel: "g",
+    }),
+  ).rejects.toThrow(/locked[\s\S]*archive|archive[\s\S]*recreat/i);
+
+  // Nothing changed — the Base unit is still what it was.
+  expect(await t.query(api.products.get, { id: rice })).toMatchObject({
+    baseUnitLabel: "kg",
+  });
+});
+
+test("a Unit's price and Base equivalent can be corrected in the same update as the Default unit changes", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [
+      { label: "piece", baseEquivalent: 1, price: 9 },
+      { label: "tray", baseEquivalent: 30, price: 250 },
+    ],
+    defaultUnitLabel: "tray",
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    defaultUnit: { label: "tray", price: 250 },
+  });
+});
