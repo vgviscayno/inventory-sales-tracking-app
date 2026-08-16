@@ -18,6 +18,18 @@ import { WindowedDayList } from "../../WindowedDayList";
 // status — reaches this form without anyone remembering to widen a type here.
 type Product = NonNullable<FunctionReturnType<typeof api.products.get>>;
 
+// A Unit under edit. Held as strings so the number fields can sit empty or
+// half-typed while she works; parsed back to numbers only at save.
+type UnitDraft = { label: string; baseEquivalent: string; price: string };
+
+function toDrafts(units: Product["units"]): UnitDraft[] {
+  return units.map((u) => ({
+    label: u.label,
+    baseEquivalent: String(u.baseEquivalent),
+    price: String(u.price),
+  }));
+}
+
 type LedgerRow = FunctionReturnType<
   typeof api.stockMovements.listForProduct
 >[number];
@@ -56,19 +68,28 @@ function ProductForm({ product }: { product: Product }) {
   // A successful save updates `product` (Convex query), so these follow it and
   // the dirty marks below clear on their own — no remount, no manual resync.
   const savedName = product.name;
+  const savedUnits = toDrafts(product.units);
+  const savedBaseUnitLabel = product.baseUnitLabel;
   // Only tracked for a multi-Unit product — a single-Unit one has nothing to
   // choose (its one Unit is already both Base and Default), so it never gets
   // offered the picker below, and this stays null.
-  const savedUnit = product.units.length > 1 ? product.defaultUnit.label : null;
+  const savedDefault =
+    product.units.length > 1 ? product.defaultUnit.label : null;
   const savedThreshold =
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "";
 
   const [name, setName] = useState(savedName);
+  const [units, setUnits] = useState<UnitDraft[]>(savedUnits);
+  const [baseUnitLabel, setBaseUnitLabel] = useState(savedBaseUnitLabel);
   const [defaultUnitLabel, setDefaultUnitLabel] = useState<string | null>(
-    savedUnit,
+    savedDefault,
   );
   const [lowStockThreshold, setLowStockThreshold] = useState(savedThreshold);
   const [saving, setSaving] = useState(false);
+  // The mutation's refusals — a locked Base unit above all — are the whole
+  // point of some of these edits, so a rejected save has to surface its reason
+  // rather than silently doing nothing.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
   // Only reached when the product still holds stock — see `handleArchive`.
   // Archiving is never blocked, so this exists purely so she sees the count
@@ -101,26 +122,112 @@ function ProductForm({ product }: { product: Product }) {
   // the count — so needing a tap to commit is never a surprise, least of all
   // for the default-unit swap, which otherwise looks identical once selected.
   const nameDirty = name !== savedName;
-  const unitDirty = defaultUnitLabel !== null && defaultUnitLabel !== savedUnit;
+  const unitsDirty =
+    JSON.stringify(units) !== JSON.stringify(savedUnits) ||
+    baseUnitLabel !== savedBaseUnitLabel;
+  const defaultDirty = defaultUnitLabel !== savedDefault;
   const thresholdDirty = lowStockThreshold !== savedThreshold;
-  const dirtyCount = [nameDirty, unitDirty, thresholdDirty].filter(
-    Boolean,
-  ).length;
+  const dirtyCount = [
+    nameDirty,
+    unitsDirty,
+    defaultDirty,
+    thresholdDirty,
+  ].filter(Boolean).length;
   const isDirty = dirtyCount > 0;
 
-  const canSave = name.trim().length > 0;
+  // The Base unit's Base equivalent is fixed at 1, so it's parsed but never
+  // entered. The rest mirror the server's `validateUnits` so Save is offered
+  // only when the mutation would accept the list — the throw is still the
+  // guarantee, this just spares her a round-trip to learn the obvious.
+  const parsedUnits = units.map((u) => ({
+    label: u.label.trim(),
+    baseEquivalent: Number(u.baseEquivalent),
+    price: Number(u.price),
+  }));
+  // The Base and Default markers name a Unit by its label, but the labels are
+  // trimmed on the way to the server — so the markers have to be trimmed to the
+  // same shape, or a stray space would make the Base unit look absent (Save
+  // silently greys, or the mutation rejects a list that's really fine).
+  const baseUnitTrimmed = baseUnitLabel.trim();
+  const labelsLower = parsedUnits.map((u) => u.label.toLowerCase());
+  const unitsValid =
+    parsedUnits.length > 0 &&
+    parsedUnits.every(
+      (u) =>
+        u.label.length > 0 &&
+        Number.isInteger(u.baseEquivalent) &&
+        u.baseEquivalent > 0 &&
+        u.price > 0,
+    ) &&
+    new Set(labelsLower).size === labelsLower.length &&
+    parsedUnits.find((u) => u.label === baseUnitTrimmed)?.baseEquivalent === 1;
+
+  const canSave = name.trim().length > 0 && unitsValid;
+
+  function resetUnits() {
+    setUnits(savedUnits);
+    setBaseUnitLabel(savedBaseUnitLabel);
+    setDefaultUnitLabel(savedDefault);
+  }
+
+  // Editing a Unit's label has to drag the Base and Default markers along with
+  // it, since both name a Unit by its label — otherwise renaming the Base unit
+  // would quietly point the marker at a label that no longer exists.
+  function editUnit(index: number, field: keyof UnitDraft, value: string) {
+    const old = units[index];
+    setUnits(units.map((u, i) => (i === index ? { ...u, [field]: value } : u)));
+    if (field === "label") {
+      if (old.label === baseUnitLabel) setBaseUnitLabel(value);
+      if (old.label === defaultUnitLabel) setDefaultUnitLabel(value);
+    }
+  }
+
+  function chooseBase(label: string) {
+    setBaseUnitLabel(label);
+    // A Base unit is one of itself, so its Base equivalent snaps to 1.
+    setUnits(
+      units.map((u) => (u.label === label ? { ...u, baseEquivalent: "1" } : u)),
+    );
+  }
+
+  function removeUnit(index: number) {
+    const removed = units[index];
+    setUnits(units.filter((_, i) => i !== index));
+    // A removed Default falls back to the Base unit (server does the same).
+    if (removed.label === defaultUnitLabel) setDefaultUnitLabel(null);
+  }
+
+  function addUnit() {
+    setUnits([...units, { label: "", baseEquivalent: "", price: "" }]);
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!canSave) return;
     setSaving(true);
-    await updateProduct({
-      id: product._id,
-      name: name.trim(),
-      ...(defaultUnitLabel !== null ? { defaultUnitLabel } : {}),
-      lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
-    });
-    setSaving(false);
+    setSaveError(null);
+    try {
+      await updateProduct({
+        id: product._id,
+        name: name.trim(),
+        ...(unitsDirty ? { units: parsedUnits } : {}),
+        // Only sent when it actually moves — the mutation reads a changed
+        // Base unit as a reassignment attempt and locks it behind "no
+        // movements", so an unchanged one (or one differing only by trimmed
+        // whitespace) must not trip that.
+        ...(unitsDirty && baseUnitTrimmed !== savedBaseUnitLabel
+          ? { baseUnitLabel: baseUnitTrimmed }
+          : {}),
+        ...(defaultDirty
+          ? { defaultUnitLabel: defaultUnitLabel?.trim() ?? null }
+          : {}),
+        lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
+      });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   // Only a product still holding stock needs a look before archiving — one
@@ -187,64 +294,22 @@ function ProductForm({ product }: { product: Product }) {
         <Link href="/movements" className="text-accent block text-[13px]">
           Log a delivery to change this count →
         </Link>
-        <DiffField
-          label="Units"
-          dirty={unitDirty}
-          was={savedUnit ?? ""}
-          wasPrefix="Default was"
-          onReset={() => setDefaultUnitLabel(savedUnit)}
-        >
-          {product.units.length > 1 && (
-            <p className="text-sub text-[13px] mb-1.5">
-              Default unit — the one its listed price is quoted in and the
-              Register preselects.
-            </p>
-          )}
-          <div className="space-y-1">
-            {product.units.map((unit) => {
-              const isDefault = defaultUnitLabel === unit.label;
-              // Only the picked-but-unsaved default gets the amber row, so the
-              // one line she'd otherwise miss is the one that stands out.
-              const rowDirty = unitDirty && isDefault;
-              return (
-                <div
-                  key={unit.label}
-                  className={`flex items-center justify-between rounded-lg border px-2.5 py-2 text-[14px] ${
-                    rowDirty ? "border-amber-400 bg-amber-50" : "border-line"
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5">
-                    {product.units.length > 1 && (
-                      <input
-                        type="radio"
-                        name="default-unit"
-                        checked={isDefault}
-                        onChange={() => setDefaultUnitLabel(unit.label)}
-                        aria-label={`Make "${unit.label}" the Default unit`}
-                      />
-                    )}
-                    {unit.label}
-                    {unit.label === product.baseUnitLabel && (
-                      <span className="pill archived ml-1.5">Base</span>
-                    )}
-                    {isDefault && (
-                      <span className="pill new ml-1.5">Default</span>
-                    )}
-                    {unit.baseEquivalent !== 1 && (
-                      <span className="text-sub">
-                        {" "}
-                        = {unit.baseEquivalent} {product.baseUnitLabel}
-                      </span>
-                    )}
-                  </span>
-                  <span className="font-semibold">
-                    ₱{unit.price.toFixed(2)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </DiffField>
+        <UnitsEditor
+          units={units}
+          baseUnitLabel={baseUnitLabel}
+          defaultUnitLabel={defaultUnitLabel}
+          savedUnits={savedUnits}
+          savedBaseUnitLabel={savedBaseUnitLabel}
+          savedDefault={savedDefault}
+          dirty={unitsDirty || defaultDirty}
+          hasMovements={product.hasMovements}
+          onEditUnit={editUnit}
+          onChooseBase={chooseBase}
+          onChooseDefault={setDefaultUnitLabel}
+          onRemoveUnit={removeUnit}
+          onAddUnit={addUnit}
+          onReset={resetUnits}
+        />
         <DiffField
           label="Low-stock threshold override (optional)"
           htmlFor="edit-low-stock-threshold"
@@ -284,6 +349,11 @@ function ProductForm({ product }: { product: Product }) {
               ? `Save ${dirtyCount} change${dirtyCount > 1 ? "s" : ""}`
               : "No changes to save"}
         </button>
+        {saveError && (
+          <p className="rounded-lg border border-danger bg-danger/5 px-2.5 py-2 text-[13px] text-danger">
+            {saveError}
+          </p>
+        )}
       </form>
 
       {isArchived ? (
@@ -395,6 +465,222 @@ function fieldInputClass(dirty: boolean): string {
   return `${FIELD_INPUT_BASE} ${
     dirty ? "border-amber-400 ring-1 ring-amber-300" : "border-line"
   }`;
+}
+
+const UNIT_INPUT =
+  "rounded-[8px] border border-line bg-card px-2 py-1.5 text-[14px]";
+
+/**
+ * The Units of a product, all editable in place: a label, a Base equivalent
+ * (fixed at 1 and read-only for the Base unit), and a price per Unit, plus the
+ * two markers — which Unit is the Base and which leads as the Default. Adding a
+ * Unit and removing a non-Base one are the same list, so correcting eggs to add
+ * a tray, or dropping a Unit she's stopped selling, never leaves this screen.
+ *
+ * Two refusals live on the server (see `products.update`) and are mirrored
+ * here only as affordances, never as the guarantee: the Base unit can't be
+ * removed (it has no remove control), and it can't be reassigned once the
+ * product has movements (the Base radios go disabled, with the reason spelt
+ * out). The mutation still throws either way, and that throw surfaces below the
+ * Save button.
+ */
+function UnitsEditor({
+  units,
+  baseUnitLabel,
+  defaultUnitLabel,
+  savedUnits,
+  savedBaseUnitLabel,
+  savedDefault,
+  dirty,
+  hasMovements,
+  onEditUnit,
+  onChooseBase,
+  onChooseDefault,
+  onRemoveUnit,
+  onAddUnit,
+  onReset,
+}: {
+  units: UnitDraft[];
+  baseUnitLabel: string;
+  defaultUnitLabel: string | null;
+  savedUnits: UnitDraft[];
+  savedBaseUnitLabel: string;
+  savedDefault: string | null;
+  dirty: boolean;
+  hasMovements: boolean;
+  onEditUnit: (index: number, field: keyof UnitDraft, value: string) => void;
+  onChooseBase: (label: string) => void;
+  onChooseDefault: (label: string) => void;
+  onRemoveUnit: (index: number) => void;
+  onAddUnit: () => void;
+  onReset: () => void;
+}) {
+  const multiUnit = units.length > 1;
+  const savedByLabel = new Map(savedUnits.map((u) => [u.label, u]));
+
+  return (
+    <div
+      className={
+        dirty
+          ? "rounded-r-lg border-l-[3px] border-amber-400 bg-amber-50/60 py-1.5 pl-2.5"
+          : undefined
+      }
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-sub text-[13px]">Units</span>
+        {dirty && (
+          <>
+            <span className="rounded bg-amber-400 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-ink">
+              Edited
+            </span>
+            <button
+              type="button"
+              onClick={onReset}
+              className="text-sub ml-auto text-[12px] underline"
+            >
+              ↺ reset
+            </button>
+          </>
+        )}
+      </div>
+      {multiUnit && (
+        <p className="text-sub text-[13px] mb-1.5">
+          Base — what stock is counted in. Default — the one its listed price is
+          quoted in and the Register preselects.
+        </p>
+      )}
+
+      <div className="space-y-1.5">
+        {units.map((unit, index) => {
+          const isBase = baseUnitLabel === unit.label;
+          const isDefault = defaultUnitLabel === unit.label;
+          const saved = savedByLabel.get(unit.label);
+          const rowDirty =
+            !saved ||
+            saved.baseEquivalent !== unit.baseEquivalent ||
+            saved.price !== unit.price ||
+            isBase !== (savedBaseUnitLabel === unit.label) ||
+            isDefault !== (savedDefault === unit.label);
+          return (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: labels are user-editable and may collide or sit empty mid-edit, so they can't identify a row
+              key={index}
+              className={`space-y-1.5 rounded-lg border px-2.5 py-2 ${
+                rowDirty ? "border-amber-400 bg-amber-50" : "border-line"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  value={unit.label}
+                  onChange={(e) => onEditUnit(index, "label", e.target.value)}
+                  placeholder="Unit name"
+                  aria-label={`Unit ${index + 1} name`}
+                  // Renaming the Base unit would move the Base marker, which is
+                  // locked once movements exist (same rule as reassignment).
+                  // Its price stays editable — a price correction isn't a
+                  // reassignment.
+                  disabled={isBase && hasMovements}
+                  className={`${UNIT_INPUT} min-w-0 flex-1 font-medium ${
+                    isBase && hasMovements ? "text-sub" : ""
+                  }`}
+                />
+                {isBase && <span className="pill archived">Base</span>}
+                {isDefault && <span className="pill new">Default</span>}
+                {multiUnit && !isBase && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveUnit(index)}
+                    aria-label={`Remove "${unit.label}"`}
+                    className="text-sub shrink-0 px-1 text-[18px] leading-none"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px]">
+                {/* Not a <label>: in the Base-unit case there's no control to
+                    bind to (the equivalent is a fixed 1), and the input carries
+                    its own aria-label either way. */}
+                <div className="flex items-center gap-1">
+                  <span className="text-sub">=</span>
+                  {isBase ? (
+                    <span className="font-semibold">1</span>
+                  ) : (
+                    <input
+                      type="number"
+                      value={unit.baseEquivalent}
+                      onChange={(e) =>
+                        onEditUnit(index, "baseEquivalent", e.target.value)
+                      }
+                      aria-label={`How many ${baseUnitLabel} in one ${
+                        unit.label || "unit"
+                      }`}
+                      className={`${UNIT_INPUT} w-16`}
+                    />
+                  )}
+                  <span className="text-sub">{baseUnitLabel}</span>
+                </div>
+                <label className="flex items-center gap-1">
+                  <span className="text-sub">₱</span>
+                  <input
+                    type="number"
+                    value={unit.price}
+                    onChange={(e) => onEditUnit(index, "price", e.target.value)}
+                    aria-label={`Price per ${unit.label || "unit"}`}
+                    className={`${UNIT_INPUT} w-20`}
+                  />
+                </label>
+              </div>
+
+              {multiUnit && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="base-unit"
+                      checked={isBase}
+                      disabled={hasMovements}
+                      onChange={() => onChooseBase(unit.label)}
+                      aria-label={`Make "${unit.label}" the Base unit`}
+                    />
+                    <span className={hasMovements ? "text-sub" : undefined}>
+                      Base
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name="default-unit"
+                      checked={isDefault}
+                      onChange={() => onChooseDefault(unit.label)}
+                      aria-label={`Make "${unit.label}" the Default unit`}
+                    />
+                    <span>Default</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {multiUnit && hasMovements && (
+        <p className="text-sub mt-1.5 text-[12px]">
+          Base unit is locked — this product already has movements. To base it
+          on a different Unit, archive this product and recreate it.
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={onAddUnit}
+        className="text-accent mt-2 text-[13px] font-semibold"
+      >
+        + Add unit
+      </button>
+    </div>
+  );
 }
 
 /**
