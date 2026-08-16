@@ -257,3 +257,104 @@ test("the ghost-product cleanup path: a mis-typed inline delivery product is dro
     await t.query(api.products.list, { include: "withArchived" }),
   ).toMatchObject([{ _id: realId, name: "Coke 1.5L" }]);
 });
+
+const EGGS_UNITS = [
+  { label: "piece", baseEquivalent: 1, price: 8 },
+  { label: "tray", baseEquivalent: 30, price: 220 },
+];
+
+test("a product created with a Default unit reads it back from get and list", async () => {
+  const t = setupTest();
+
+  const id = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+  });
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    defaultUnit: { label: "tray", price: 220 },
+  });
+  expect(await t.query(api.products.list, {})).toMatchObject([
+    { defaultUnit: { label: "tray", price: 220 } },
+  ]);
+});
+
+test("a product created with no Default unit reads back the Base unit as its Default everywhere", async () => {
+  const t = setupTest();
+
+  const id = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    defaultUnit: { label: "piece", price: 8 },
+  });
+  expect(await t.query(api.products.list, {})).toMatchObject([
+    { defaultUnit: { label: "piece", price: 8 } },
+  ]);
+});
+
+test("products.create refuses a Default unit label not among the Units", async () => {
+  const t = setupTest();
+
+  await expect(
+    t.mutation(api.products.create, {
+      name: "Eggs",
+      units: EGGS_UNITS,
+      baseUnitLabel: "piece",
+      defaultUnitLabel: "sack",
+    }),
+  ).rejects.toThrow();
+});
+
+test("updating a product's Default unit changes what get and list read", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.products.update, { id, defaultUnitLabel: "tray" });
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    defaultUnit: { label: "tray" },
+  });
+});
+
+test("clearing a product's Default unit with null falls back to the Base unit again", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.products.update, { id, defaultUnitLabel: "tray" });
+
+  await t.mutation(api.products.update, { id, defaultUnitLabel: null });
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    defaultUnit: { label: "piece" },
+  });
+});
+
+test("updating a product refuses a Default unit label not among its Units", async () => {
+  const t = setupTest();
+  const id = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await expect(
+    t.mutation(api.products.update, { id, defaultUnitLabel: "sack" }),
+  ).rejects.toThrow();
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    defaultUnit: { label: "piece" },
+  });
+});

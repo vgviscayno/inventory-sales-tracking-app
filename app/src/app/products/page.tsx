@@ -32,8 +32,18 @@ export default function ProductsPage() {
   const [extraUnits, setExtraUnits] = useState<
     { key: string; label: string; baseEquivalent: string; price: string }[]
   >([]);
+  // Which label to nominate as Default, chosen from whichever labels are
+  // currently non-empty — validated against that set at submit time rather
+  // than kept in sync as she types, so a mid-edit rename can't leave a
+  // dangling selection. Empty means unset (falls back to the Base unit).
+  const [defaultUnitLabel, setDefaultUnitLabel] = useState("");
   const [lowStockThreshold, setLowStockThreshold] = useState("");
   const [adding, setAdding] = useState(false);
+
+  const unitLabels = [
+    baseUnitLabel.trim(),
+    ...extraUnits.map((u) => u.label.trim()),
+  ].filter(Boolean);
 
   const canAdd =
     name.trim() &&
@@ -92,6 +102,9 @@ export default function ProductsPage() {
         })),
       ],
       baseUnitLabel: baseUnitLabel.trim(),
+      defaultUnitLabel: unitLabels.includes(defaultUnitLabel)
+        ? defaultUnitLabel
+        : undefined,
       lowStockThreshold: lowStockThreshold
         ? Number(lowStockThreshold)
         : undefined,
@@ -100,6 +113,7 @@ export default function ProductsPage() {
     setBaseUnitLabel("");
     setBaseUnitPrice("");
     setExtraUnits([]);
+    setDefaultUnitLabel("");
     setLowStockThreshold("");
     setAdding(false);
     setFormOpen(false);
@@ -260,6 +274,37 @@ export default function ProductsPage() {
             + Add another Unit
           </button>
 
+          {unitLabels.length > 1 && (
+            <div>
+              <label
+                htmlFor="product-default-unit"
+                className="text-sub block text-[13px] mb-1"
+              >
+                Default unit — the one its listed price is quoted in and the
+                Register preselects
+              </label>
+              <select
+                id="product-default-unit"
+                value={
+                  unitLabels.includes(defaultUnitLabel) ? defaultUnitLabel : ""
+                }
+                onChange={(e) => setDefaultUnitLabel(e.target.value)}
+                className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+              >
+                <option value="">
+                  {baseUnitLabel.trim() || "Base unit"} (default)
+                </option>
+                {unitLabels
+                  .filter((label) => label !== baseUnitLabel.trim())
+                  .map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
+
           <div>
             <label
               htmlFor="product-low-stock-threshold"
@@ -305,12 +350,8 @@ export default function ProductsPage() {
             <div>
               <div className="font-semibold">{p.name}</div>
               <div className="text-sub text-[13px]">
-                ₱
-                {(
-                  p.units.find((u) => u.label === p.baseUnitLabel)?.price ??
-                  p.units[0].price
-                ).toFixed(2)}
-                /{p.baseUnitLabel} · {p.quantityOnHand} in stock
+                ₱{p.defaultUnit.price.toFixed(2)}/{p.defaultUnit.label} ·{" "}
+                {p.quantityOnHand} in stock
               </div>
             </div>
             <StockStatusPill status={p.lowStockStatus} />

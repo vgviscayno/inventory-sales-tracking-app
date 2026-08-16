@@ -52,10 +52,22 @@ function ProductForm({ product }: { product: Product }) {
   const unarchiveProduct = useMutation(api.products.unarchive);
   const deleteProduct = useMutation(api.products.remove);
 
-  const [name, setName] = useState(product.name);
-  const [lowStockThreshold, setLowStockThreshold] = useState(
-    product.lowStockThreshold != null ? String(product.lowStockThreshold) : "",
+  // The saved values, derived fresh from the live product on every render.
+  // A successful save updates `product` (Convex query), so these follow it and
+  // the dirty marks below clear on their own — no remount, no manual resync.
+  const savedName = product.name;
+  // Only tracked for a multi-Unit product — a single-Unit one has nothing to
+  // choose (its one Unit is already both Base and Default), so it never gets
+  // offered the picker below, and this stays null.
+  const savedUnit = product.units.length > 1 ? product.defaultUnit.label : null;
+  const savedThreshold =
+    product.lowStockThreshold != null ? String(product.lowStockThreshold) : "";
+
+  const [name, setName] = useState(savedName);
+  const [defaultUnitLabel, setDefaultUnitLabel] = useState<string | null>(
+    savedUnit,
   );
+  const [lowStockThreshold, setLowStockThreshold] = useState(savedThreshold);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
   // Only reached when the product still holds stock — see `handleArchive`.
@@ -84,6 +96,18 @@ function ProductForm({ product }: { product: Product }) {
     | null
   >(null);
 
+  // What's edited but not yet saved. Each dirty field flags itself in the form
+  // below (amber rail, "was …", a per-field reset), and the Save button carries
+  // the count — so needing a tap to commit is never a surprise, least of all
+  // for the default-unit swap, which otherwise looks identical once selected.
+  const nameDirty = name !== savedName;
+  const unitDirty = defaultUnitLabel !== null && defaultUnitLabel !== savedUnit;
+  const thresholdDirty = lowStockThreshold !== savedThreshold;
+  const dirtyCount = [nameDirty, unitDirty, thresholdDirty].filter(
+    Boolean,
+  ).length;
+  const isDirty = dirtyCount > 0;
+
   const canSave = name.trim().length > 0;
 
   async function handleSave(e: React.FormEvent) {
@@ -93,6 +117,7 @@ function ProductForm({ product }: { product: Product }) {
     await updateProduct({
       id: product._id,
       name: name.trim(),
+      ...(defaultUnitLabel !== null ? { defaultUnitLabel } : {}),
       lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
     });
     setSaving(false);
@@ -139,20 +164,20 @@ function ProductForm({ product }: { product: Product }) {
       </Link>
 
       <form onSubmit={handleSave} className="card space-y-2.5 p-3">
-        <div>
-          <label
-            htmlFor="edit-name"
-            className="text-sub block text-[13px] mb-1"
-          >
-            Name
-          </label>
+        <DiffField
+          label="Name"
+          htmlFor="edit-name"
+          dirty={nameDirty}
+          was={savedName}
+          onReset={() => setName(savedName)}
+        >
           <input
             id="edit-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+            className={fieldInputClass(nameDirty)}
           />
-        </div>
+        </DiffField>
         <div>
           <div className="text-sub block text-[13px] mb-1">Qty on hand</div>
           <div className="px-2.5 py-2.5 text-[15px] font-semibold">
@@ -162,47 +187,80 @@ function ProductForm({ product }: { product: Product }) {
         <Link href="/movements" className="text-accent block text-[13px]">
           Log a delivery to change this count →
         </Link>
-        <div>
-          <div className="text-sub block text-[13px] mb-1">Units</div>
+        <DiffField
+          label="Units"
+          dirty={unitDirty}
+          was={savedUnit ?? ""}
+          wasPrefix="Default was"
+          onReset={() => setDefaultUnitLabel(savedUnit)}
+        >
+          {product.units.length > 1 && (
+            <p className="text-sub text-[13px] mb-1.5">
+              Default unit — the one its listed price is quoted in and the
+              Register preselects.
+            </p>
+          )}
           <div className="space-y-1">
-            {product.units.map((unit) => (
-              <div
-                key={unit.label}
-                className="flex items-center justify-between rounded-lg border border-line px-2.5 py-2 text-[14px]"
-              >
-                <span>
-                  {unit.label}
-                  {unit.label === product.baseUnitLabel && (
-                    <span className="pill archived ml-1.5">Base</span>
-                  )}
-                  {unit.baseEquivalent !== 1 && (
-                    <span className="text-sub">
-                      {" "}
-                      = {unit.baseEquivalent} {product.baseUnitLabel}
-                    </span>
-                  )}
-                </span>
-                <span className="font-semibold">₱{unit.price.toFixed(2)}</span>
-              </div>
-            ))}
+            {product.units.map((unit) => {
+              const isDefault = defaultUnitLabel === unit.label;
+              // Only the picked-but-unsaved default gets the amber row, so the
+              // one line she'd otherwise miss is the one that stands out.
+              const rowDirty = unitDirty && isDefault;
+              return (
+                <div
+                  key={unit.label}
+                  className={`flex items-center justify-between rounded-lg border px-2.5 py-2 text-[14px] ${
+                    rowDirty ? "border-amber-400 bg-amber-50" : "border-line"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    {product.units.length > 1 && (
+                      <input
+                        type="radio"
+                        name="default-unit"
+                        checked={isDefault}
+                        onChange={() => setDefaultUnitLabel(unit.label)}
+                        aria-label={`Make "${unit.label}" the Default unit`}
+                      />
+                    )}
+                    {unit.label}
+                    {unit.label === product.baseUnitLabel && (
+                      <span className="pill archived ml-1.5">Base</span>
+                    )}
+                    {isDefault && (
+                      <span className="pill new ml-1.5">Default</span>
+                    )}
+                    {unit.baseEquivalent !== 1 && (
+                      <span className="text-sub">
+                        {" "}
+                        = {unit.baseEquivalent} {product.baseUnitLabel}
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-semibold">
+                    ₱{unit.price.toFixed(2)}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-        </div>
-        <div>
-          <label
-            htmlFor="edit-low-stock-threshold"
-            className="text-sub block text-[13px] mb-1"
-          >
-            Low-stock threshold override (optional)
-          </label>
+        </DiffField>
+        <DiffField
+          label="Low-stock threshold override (optional)"
+          htmlFor="edit-low-stock-threshold"
+          dirty={thresholdDirty}
+          was={savedThreshold || "global default"}
+          onReset={() => setLowStockThreshold(savedThreshold)}
+        >
           <input
             id="edit-low-stock-threshold"
             type="number"
             value={lowStockThreshold}
             onChange={(e) => setLowStockThreshold(e.target.value)}
             placeholder="Uses global default"
-            className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+            className={fieldInputClass(thresholdDirty)}
           />
-        </div>
+        </DiffField>
         {isArchived ? (
           <span className="pill archived inline-block">Archived</span>
         ) : (
@@ -213,10 +271,18 @@ function ProductForm({ product }: { product: Product }) {
         )}
         <button
           type="submit"
-          disabled={saving || !canSave}
-          className="w-full rounded-xl bg-accent py-2.5 font-bold text-accent-ink disabled:bg-[#d6d3d1]"
+          disabled={saving || !canSave || !isDirty}
+          className={`w-full rounded-xl py-2.5 font-bold ${
+            isDirty && canSave
+              ? "bg-amber-400 text-ink"
+              : "bg-[#d6d3d1] text-white"
+          }`}
         >
-          {saving ? "Saving..." : "Save Changes"}
+          {saving
+            ? "Saving..."
+            : isDirty
+              ? `Save ${dirtyCount} change${dirtyCount > 1 ? "s" : ""}`
+              : "No changes to save"}
         </button>
       </form>
 
@@ -317,6 +383,83 @@ function ProductForm({ product }: { product: Product }) {
         />
       )}
     </main>
+  );
+}
+
+const FIELD_INPUT_BASE =
+  "w-full rounded-[10px] border bg-card px-2.5 py-2.5 text-[15px]";
+
+// An edited input gets an amber border + ring so the change is visible even
+// with the field scrolled past its label.
+function fieldInputClass(dirty: boolean): string {
+  return `${FIELD_INPUT_BASE} ${
+    dirty ? "border-amber-400 ring-1 ring-amber-300" : "border-line"
+  }`;
+}
+
+/**
+ * A form field that shows, in place, whether it's been edited but not saved:
+ * an amber left rail, an "Edited" tag, the saved value struck through, and a
+ * one-tap reset. When clean it renders as a plain labelled field, so a settled
+ * product carries no marks at all. The label stays a real `<label htmlFor>`
+ * when the field wraps a single input; the Units group, which has none, passes
+ * no `htmlFor` and gets a plain caption instead.
+ */
+function DiffField({
+  label,
+  htmlFor,
+  dirty,
+  was,
+  wasPrefix = "was",
+  onReset,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  dirty: boolean;
+  was: string;
+  wasPrefix?: string;
+  onReset: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={
+        dirty
+          ? "rounded-r-lg border-l-[3px] border-amber-400 bg-amber-50/60 py-1.5 pl-2.5"
+          : undefined
+      }
+    >
+      <div className="mb-1 flex items-center gap-2">
+        {htmlFor ? (
+          <label htmlFor={htmlFor} className="text-sub text-[13px]">
+            {label}
+          </label>
+        ) : (
+          <span className="text-sub text-[13px]">{label}</span>
+        )}
+        {dirty && (
+          <>
+            <span className="rounded bg-amber-400 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-ink">
+              Edited
+            </span>
+            <button
+              type="button"
+              onClick={onReset}
+              className="text-sub ml-auto text-[12px] underline"
+            >
+              ↺ reset
+            </button>
+          </>
+        )}
+      </div>
+      {children}
+      {dirty && (
+        <p className="text-sub mt-1 text-[12px]">
+          {wasPrefix}: <span className="line-through">{was || "—"}</span>
+        </p>
+      )}
+    </div>
   );
 }
 

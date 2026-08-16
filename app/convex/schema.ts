@@ -21,6 +21,12 @@ export default defineSchema({
     // explicitly rather than inferred from a `baseEquivalent` of 1. Locked
     // once the product has movements — see docs/adr/0004-base-unit-locked.md.
     baseUnitLabel: v.string(),
+    // Which `units[].label` this product leads with — the Unit its listed
+    // price is quoted in and the Register preselects. A separate decision
+    // from the Base unit (see CONTEXT.md's "Default unit"), and unlocked:
+    // absent means "no choice recorded", and every reader falls back to the
+    // Base unit rather than treating absence as its own case.
+    defaultUnitLabel: v.optional(v.string()),
     quantityOnHand: v.number(),
     lowStockThreshold: v.optional(v.number()),
     // Uniform two-state lifecycle, absent meaning active. Only `archivedAt`

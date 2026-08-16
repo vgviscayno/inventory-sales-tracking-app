@@ -188,72 +188,83 @@ export default function RegisterPage() {
             const cartLinesForProduct = cart.filter(
               (l) => l.productId === p._id,
             );
-            // A single-Unit product taps as a whole tile, same as before
-            // Units existed. A multi-Unit product — eggs sold by the piece
-            // and by the tray — needs each Unit picked explicitly, so it
-            // renders one small button per Unit instead.
-            if (p.units.length === 1) {
-              const unit = p.units[0];
-              const inCart = cartLinesForProduct[0];
-              return (
+            const inCartDefault = cartLinesForProduct.find(
+              (l) => l.unitLabel === p.defaultUnit.label,
+            );
+            // The Default unit taps as one big, obviously-pressable button —
+            // the common case, one tap. A multi-Unit product's other Units —
+            // eggs sold by the piece as well as the tray — sit underneath as
+            // smaller buttons for the times she means one of those instead. A
+            // single-Unit product simply has none of those, so it's just the
+            // one button. Each price is spelled out "per <unit>" so what it's
+            // priced in reads at a glance.
+            const otherUnits = p.units.filter(
+              (u) => u.label !== p.defaultUnit.label,
+            );
+            return (
+              <div key={p._id} className="card p-3 text-left">
+                <div className="mb-1 text-sm font-semibold">{p.name}</div>
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="text-sub text-[12px]">
+                    {p.quantityOnHand} left
+                  </span>
+                  <StockStatusPill status={p.lowStockStatus} />
+                </div>
                 <button
-                  key={p._id}
                   type="button"
-                  onClick={() => addToCart(p, unit)}
-                  className={`card relative p-3 text-left ${inCart ? "border-accent" : ""}`}
+                  onClick={() => addToCart(p, p.defaultUnit)}
+                  className={`relative flex w-full items-center gap-2 rounded-xl border px-3 py-2.5 text-left shadow-sm transition active:scale-[.97] ${
+                    inCartDefault
+                      ? "border-accent bg-accent/10"
+                      : "border-line bg-bg hover:border-accent/60"
+                  }`}
                 >
-                  <div className="text-sm font-semibold">{p.name}</div>
-                  <div className="text-sub text-[13px]">
-                    ₱{unit.price.toFixed(2)} · {p.quantityOnHand} left
-                  </div>
-                  <StockStatusPill
-                    status={p.lowStockStatus}
-                    className="mt-1 inline-block"
-                  />
-                  {inCart && (
-                    <span className="absolute top-2 right-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-accent-ink">
-                      {inCart.quantity}
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-lg font-bold leading-none text-accent">
+                    +
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-semibold">
+                      ₱{p.defaultUnit.price.toFixed(2)}
+                    </span>
+                    <span className="block text-sub text-[12px]">
+                      per {p.defaultUnit.label}
+                    </span>
+                  </span>
+                  {inCartDefault && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold text-accent-ink">
+                      {inCartDefault.quantity}
                     </span>
                   )}
                 </button>
-              );
-            }
-            return (
-              <div key={p._id} className="card p-3 text-left">
-                <div className="text-sm font-semibold">{p.name}</div>
-                <div className="text-sub text-[13px]">
-                  {p.quantityOnHand} left
-                </div>
-                <StockStatusPill
-                  status={p.lowStockStatus}
-                  className="mt-1 mb-1.5 inline-block"
-                />
-                <div className="flex flex-wrap gap-1.5">
-                  {p.units.map((unit) => {
-                    const inCart = cartLinesForProduct.find(
-                      (l) => l.unitLabel === unit.label,
-                    );
-                    return (
-                      <button
-                        key={unit.label}
-                        type="button"
-                        onClick={() => addToCart(p, unit)}
-                        className={`relative rounded-lg border px-2 py-1 text-[12px] font-semibold ${
-                          inCart
-                            ? "border-accent bg-accent/10"
-                            : "border-line bg-card"
-                        }`}
-                      >
-                        {unit.label} · ₱{unit.price.toFixed(2)}
-                        {inCart && (
-                          <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-ink">
-                            {inCart.quantity}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                {otherUnits.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {otherUnits.map((unit) => {
+                      const inCart = cartLinesForProduct.find(
+                        (l) => l.unitLabel === unit.label,
+                      );
+                      return (
+                        <button
+                          key={unit.label}
+                          type="button"
+                          onClick={() => addToCart(p, unit)}
+                          className={`relative flex items-center gap-1 rounded-lg border px-2 py-1.5 text-[12px] font-semibold shadow-sm transition active:scale-[.95] ${
+                            inCart
+                              ? "border-accent bg-accent/10 text-accent"
+                              : "border-line bg-bg hover:border-accent/60"
+                          }`}
+                        >
+                          <span className="text-accent">+</span>
+                          {unit.label} · ₱{unit.price.toFixed(2)}
+                          {inCart && (
+                            <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-ink">
+                              {inCart.quantity}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
