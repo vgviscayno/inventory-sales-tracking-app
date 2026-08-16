@@ -223,6 +223,46 @@ function ProductForm({ product }: { product: Product }) {
           : {}),
         lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
       });
+      // Canonicalize the local drafts to exactly what the reactive query will
+      // hand back, so every dirty mark clears instead of relying on the typed
+      // strings happening to match the saved round-trip. Two mismatches
+      // otherwise leave the Units group amber forever: a price typed "10.50"
+      // (stored 10.5 → "10.5") or a stray space in a label never string-equals
+      // `savedUnits`; and an *unset* Default silently follows the Base unit in
+      // `savedDefault`, so reassigning the Base — or adding a Unit that crosses
+      // 1 → 2 — moves the saved Default out from under a local one that didn't.
+      setName(name.trim());
+      setUnits(
+        parsedUnits.map((u) => ({
+          label: u.label,
+          baseEquivalent: String(u.baseEquivalent),
+          price: String(u.price),
+        })),
+      );
+      setBaseUnitLabel(baseUnitTrimmed);
+      setLowStockThreshold(
+        lowStockThreshold ? String(Number(lowStockThreshold)) : "",
+      );
+      // The Default's resulting stored value: what we sent if it moved,
+      // otherwise the product's own — unless that Unit was just removed, which
+      // the mutation clears (see `products.update`). Then resolve it the one
+      // way `withStatus` does — unset falls back to the Base unit — so it lands
+      // on the same label the refreshed `savedDefault` will.
+      const nextStoredDefault = defaultDirty
+        ? (defaultUnitLabel?.trim() ?? null)
+        : product.defaultUnitLabel != null &&
+            parsedUnits.some((u) => u.label === product.defaultUnitLabel)
+          ? product.defaultUnitLabel
+          : null;
+      setDefaultUnitLabel(
+        parsedUnits.length <= 1
+          ? null
+          : (
+              parsedUnits.find(
+                (u) => u.label === (nextStoredDefault ?? baseUnitTrimmed),
+              ) ?? parsedUnits[0]
+            ).label,
+      );
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
