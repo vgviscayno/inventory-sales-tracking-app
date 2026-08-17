@@ -206,6 +206,79 @@ test("a failed line leaves neither the new product nor the delivery behind", asy
   await expectCacheMatchesLedger(t, coke);
 });
 
+const EGGS_UNITS = [
+  { label: "piece", baseEquivalent: 1, price: 8 },
+  { label: "tray", baseEquivalent: 30, price: 220 },
+];
+
+test("a delivery line in a non-Base Unit moves stock by the derived Base amount", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 60, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 5 },
+    ],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 210, // 60 + 5 * 30
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("one delivery can carry the same product on two lines in two Units, summing the derived amount", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 5 },
+      { kind: "existing", productId: eggs, unitLabel: "piece", quantity: 12 },
+    ],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 162, // 5 * 30 + 12
+  });
+  const entry = (await t.query(api.deliveries.list, {})).find(
+    (e) => e._id === deliveryId,
+  );
+  expect(entry?.lines).toHaveLength(2);
+  expect(entry?.netChange).toBe(162);
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("an existing line with no Unit named falls back to the product's Default unit", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.products.update, {
+    id: eggs,
+    defaultUnitLabel: "tray",
+  });
+
+  await t.mutation(api.deliveries.create, {
+    lines: [{ kind: "existing", productId: eggs, quantity: 3 }],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 90, // 3 trays, not 3 pieces
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
 test("deliveries list newest first, each carrying its lines and net change", async () => {
   const t = setupTest();
   // Both held at zero: this test counts deliveries, and a stocked fixture

@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
+import { resolveDefaultUnitLabel } from "./products";
 import { entryLines, recordMovement } from "./stockMovements";
 
 export const create = mutation({
@@ -14,6 +15,12 @@ export const create = mutation({
         v.object({
           kind: v.literal("existing"),
           productId: v.id("products"),
+          // The Unit this line's quantity is entered in. Omitted falls back
+          // to the product's Default unit — see `resolveDefaultUnitLabel` — so a
+          // caller that doesn't care about Units (most existing tests, the
+          // "new" line's own creation path) still lands on the Base unit a
+          // single-Unit product always defaults to.
+          unitLabel: v.optional(v.string()),
           quantity: v.number(),
         }),
         v.object({
@@ -68,7 +75,7 @@ export const create = mutation({
         productId = line.productId;
         const product = await ctx.db.get(productId);
         if (!product) throw new Error("Product not found");
-        unitLabel = product.baseUnitLabel;
+        unitLabel = line.unitLabel ?? resolveDefaultUnitLabel(product);
       } else {
         unitLabel = line.unitLabel;
         productId = await ctx.db.insert("products", {

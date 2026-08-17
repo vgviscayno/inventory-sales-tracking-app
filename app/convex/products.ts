@@ -20,6 +20,19 @@ export function findUnit(product: Doc<"products">, label: string) {
 }
 
 /**
+ * The Unit a fresh line should preselect when none is named — "unset falls
+ * back to the Base unit" (see the `defaultUnitLabel` schema comment), decided
+ * once here so `withStatus` and every mutation that defaults an omitted
+ * `unitLabel` (deliveries, entry edits) agree on the same fallback.
+ */
+export function resolveDefaultUnitLabel(product: {
+  defaultUnitLabel?: string;
+  baseUnitLabel: string;
+}) {
+  return product.defaultUnitLabel ?? product.baseUnitLabel;
+}
+
+/**
  * The invariants a product's Units must hold at creation — at least one, each
  * with a non-empty, unique label and a positive price, a whole-number Base
  * equivalent, and exactly one of them named as the Base unit with a Base
@@ -102,9 +115,8 @@ function withStatus<
   // products list row, the product edit page) so "unset falls back to the
   // Base unit" has exactly one place it's decided.
   const defaultUnit =
-    product.units.find(
-      (u) => u.label === (product.defaultUnitLabel ?? product.baseUnitLabel),
-    ) ?? product.units[0];
+    product.units.find((u) => u.label === resolveDefaultUnitLabel(product)) ??
+    product.units[0];
   if (product.archivedAt !== undefined) {
     return { ...product, lowStockStatus: undefined, defaultUnit };
   }

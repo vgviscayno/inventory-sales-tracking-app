@@ -8,7 +8,7 @@ import {
 } from "./_generated/server";
 import { roundCentavos } from "./money";
 import { findOversold } from "./oversold";
-import { findUnit } from "./products";
+import { findUnit, resolveDefaultUnitLabel } from "./products";
 
 // The fixed reason set for a pull-out. Lives here — not in pullouts.ts — so
 // both `pullouts.create` and `stockMovements.editEntry` (which patches the
@@ -304,6 +304,14 @@ export const editEntry = mutation({
       v.object({
         movementId: v.optional(v.id("stockMovements")),
         productId: v.id("products"),
+        // The Unit this line's quantity is entered in. A surviving line
+        // (carrying a `movementId`) may only repeat the Unit it already has —
+        // see the guard below — so omitted there means "unchanged"; on a
+        // fresh line it falls back to the product's Default unit, same as
+        // `deliveries.create`. Optional rather than required so a caller that
+        // doesn't yet deal in Units (pull-out editing) keeps working
+        // unmodified.
+        unitLabel: v.optional(v.string()),
         quantity: v.number(),
       }),
     ),
@@ -382,6 +390,21 @@ export const editEntry = mutation({
           "A line's product can't change — remove it and add a new line instead",
         );
       }
+      // A Unit change is not a quantity patch — the row's `unitLabel` and
+      // `baseEquivalentAtEntry` are snapshotted together (ADR-0003), so
+      // reinterpreting one without the other is the same corruption a
+      // product swap would be. The sheet still presents changing a line's
+      // Unit as an ordinary edit; it does so by dropping this line's
+      // `movementId` and sending a fresh one instead, which never reaches
+      // this guard.
+      if (
+        line.unitLabel !== undefined &&
+        line.unitLabel !== movement.unitLabel
+      ) {
+        throw new Error(
+          "A line's Unit can't change — remove it and add a new line instead",
+        );
+      }
       referencedIds.add(line.movementId);
     }
 
@@ -391,17 +414,30 @@ export const editEntry = mutation({
     // one raised — the way the diff will actually leave it, not line by line.
     const deltaLines: { productId: Id<"products">; delta: number }[] = [];
     for (const line of lines) {
-      const newSigned = DIRECTION[entry.type] * line.quantity;
+      const signedUnitQuantity = DIRECTION[entry.type] * line.quantity;
       if (line.movementId) {
         const movement = existingById.get(line.movementId);
         if (movement) {
           deltaLines.push({
             productId: line.productId,
-            delta: newSigned - deriveBaseAmount(movement),
+            delta:
+              deriveBaseAmount({
+                unitQuantity: signedUnitQuantity,
+                baseEquivalentAtEntry: movement.baseEquivalentAtEntry,
+              }) - deriveBaseAmount(movement),
           });
         }
       } else {
-        deltaLines.push({ productId: line.productId, delta: newSigned });
+        const product = await ctx.db.get(line.productId);
+        if (!product) throw new Error("Product not found");
+        const unit = findUnit(
+          product,
+          line.unitLabel ?? resolveDefaultUnitLabel(product),
+        );
+        deltaLines.push({
+          productId: line.productId,
+          delta: Math.round(signedUnitQuantity * unit.baseEquivalent),
+        });
       }
     }
     for (const movement of existing) {
@@ -450,15 +486,18 @@ export const editEntry = mutation({
     // Existing lines that survive: patch the quantity (a no-op delta when
     // unchanged) and, for a pull-out, the reason — which lives once per entry
     // but is stored on every row, so a reason edit has to reach all of them.
-    // Delivery and pull-out lines ride the product's Base unit throughout, so
-    // the stored `unitQuantity` is patched straight to the new signed amount
-    // — `baseEquivalentAtEntry` (already 1) never needs touching.
+    // The Unit can't change on a surviving line (guarded above), so
+    // `baseEquivalentAtEntry` stays put — only `unitQuantity` is patched.
     for (const line of lines) {
       if (!line.movementId) continue;
       const movement = existingById.get(line.movementId);
       if (!movement) continue;
-      const newSigned = DIRECTION[entry.type] * line.quantity;
-      const diff = newSigned - deriveBaseAmount(movement);
+      const signedUnitQuantity = DIRECTION[entry.type] * line.quantity;
+      const diff =
+        deriveBaseAmount({
+          unitQuantity: signedUnitQuantity,
+          baseEquivalentAtEntry: movement.baseEquivalentAtEntry,
+        }) - deriveBaseAmount(movement);
       if (diff !== 0) {
         const product = await ctx.db.get(line.productId);
         if (!product) throw new Error("Product not found");
@@ -467,24 +506,26 @@ export const editEntry = mutation({
         });
       }
       await ctx.db.patch(movement._id, {
-        unitQuantity: newSigned,
+        unitQuantity: signedUnitQuantity,
         ...(entry.type === "pullout" ? { reasonCategory, reasonNotes } : {}),
       });
     }
 
-    // New lines: insert and move stock, same as a fresh entry. Both entry
-    // types ride the product's Base unit (their own Unit pickers arrive in
-    // later tickets), so the Unit is always the product's own.
+    // New lines: insert and move stock, same as a fresh entry. An omitted
+    // Unit falls back to the product's Default unit, same as
+    // `deliveries.create` — pull-out lines don't yet send one, so they keep
+    // landing on the Base unit.
     for (const line of lines) {
       if (line.movementId) continue;
       const product = await ctx.db.get(line.productId);
       if (!product) throw new Error("Product not found");
+      const unitLabel = line.unitLabel ?? resolveDefaultUnitLabel(product);
       if (entry.type === "pullout") {
         await recordMovement(ctx, {
           type: "pullout",
           refId: entry.entryId,
           productId: line.productId,
-          unitLabel: product.baseUnitLabel,
+          unitLabel,
           unitQuantity: line.quantity,
           reasonCategory: reasonCategory as string,
           reasonNotes,
@@ -494,7 +535,7 @@ export const editEntry = mutation({
           type: "delivery",
           refId: entry.entryId,
           productId: line.productId,
-          unitLabel: product.baseUnitLabel,
+          unitLabel,
           unitQuantity: line.quantity,
         });
       }
