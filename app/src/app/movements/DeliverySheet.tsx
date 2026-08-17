@@ -24,20 +24,30 @@ import { SupplierPicker } from "../SupplierPicker";
 // created with — `key` gives both kinds a stable identity for React and for
 // the bump/setQuantity/removeLine calls below, which don't otherwise care
 // which kind they're touching. An existing line prefilled from an entry under
-// edit carries `movementId` and the `originalQuantity` it opened with, so the
-// diff sent to `editEntry` is judged against what this line actually was —
-// not against the product's live count, which other entries may have moved
+// edit carries `movementId` and the `originalBaseAmount` it opened with, so
+// the diff sent to `editEntry` is judged against what this line actually was
+// — not against the product's live count, which other entries may have moved
 // since. A line's `key` is its `movementId` when it has one, so two prefilled
 // lines for the same product (one entry can touch a product twice) stay
 // distinct rather than colliding on `productId`.
+//
+// An existing line's `quantity` is a count in its own `unitLabel`, not a Base
+// amount — "5 trays" stays "5", not "150". Changing the Unit on a prefilled
+// line clears its `movementId` (and `originalBaseAmount`) rather than patching
+// it in place: `editEntry` refuses an in-place Unit change on a surviving row
+// (the Unit and its Base equivalent are snapshotted together), so the sheet
+// gets the same ordinary-edit feel by turning that line into a fresh insert
+// and letting the old row fall out of the diff as a drop. The strictness
+// lives server-side; from here it just looks like picking a different Unit.
 type Line =
   | {
       kind: "existing";
       key: string;
       movementId?: Id<"stockMovements">;
       productId: Id<"products">;
+      unitLabel: string;
       quantity: number;
-      originalQuantity?: number;
+      originalBaseAmount?: number;
     }
   | {
       kind: "deleted";
@@ -45,8 +55,9 @@ type Line =
       movementId: Id<"stockMovements">;
       productId: Id<"products">;
       productName: string;
+      unitLabel: string;
       quantity: number;
-      originalQuantity: number;
+      originalBaseAmount: number;
     }
   | {
       kind: "new";
@@ -113,8 +124,9 @@ export function DeliverySheet({
               key: l.movementId,
               movementId: l.movementId,
               productId: l.productId,
-              quantity: l.baseAmount,
-              originalQuantity: l.baseAmount,
+              unitLabel: l.unitLabel,
+              quantity: l.unitQuantity,
+              originalBaseAmount: l.baseAmount,
             }
           : {
               kind: "deleted" as const,
@@ -122,8 +134,9 @@ export function DeliverySheet({
               movementId: l.movementId,
               productId: l.productId,
               productName: l.productName,
-              quantity: l.baseAmount,
-              originalQuantity: l.baseAmount,
+              unitLabel: l.unitLabel,
+              quantity: l.unitQuantity,
+              originalBaseAmount: l.baseAmount,
             },
       ),
     );
@@ -138,9 +151,15 @@ export function DeliverySheet({
 
   function addExistingLine(productId: Id<"products">) {
     setWarned(false);
+    const product = allProducts.find((p) => p._id === productId);
+    const unitLabel = product?.defaultUnit.label ?? product?.baseUnitLabel;
+    if (!unitLabel) return;
     setLines((prev) => {
       const existing = prev.find(
-        (l) => l.kind === "existing" && l.productId === productId,
+        (l) =>
+          l.kind === "existing" &&
+          l.productId === productId &&
+          l.unitLabel === unitLabel,
       );
       if (existing) {
         return prev.map((l) =>
@@ -149,10 +168,36 @@ export function DeliverySheet({
       }
       return [
         ...prev,
-        { kind: "existing", key: productId, productId, quantity: 1 },
+        {
+          kind: "existing",
+          key: `${productId}:${unitLabel}`,
+          productId,
+          unitLabel,
+          quantity: 1,
+        },
       ];
     });
     setSearch("");
+  }
+
+  function setLineUnit(key: string, unitLabel: string) {
+    setWarned(false);
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key === key && l.kind === "existing"
+          ? {
+              ...l,
+              unitLabel,
+              // The Unit and its Base-equivalent snapshot are one unit of
+              // change server-side — dropping the movement id turns this
+              // into a fresh insert rather than an in-place patch `editEntry`
+              // would refuse. See the `Line` type's doc comment.
+              movementId: undefined,
+              originalBaseAmount: undefined,
+            }
+          : l,
+      ),
+    );
   }
 
   function addNewProductLine(name: string) {
@@ -228,9 +273,14 @@ export function DeliverySheet({
   const deltaLines: { productId: Id<"products">; delta: number }[] = [];
   for (const line of resolvedLines) {
     if (line.kind !== "existing") continue;
+    const unit =
+      line.product.units.find((u) => u.label === line.unitLabel) ??
+      line.product.units.find((u) => u.label === line.product.baseUnitLabel);
+    if (!unit) continue;
+    const baseAmount = Math.round(line.quantity * unit.baseEquivalent);
     deltaLines.push({
       productId: line.productId,
-      delta: line.quantity - (line.originalQuantity ?? 0),
+      delta: baseAmount - (line.originalBaseAmount ?? 0),
     });
   }
   if (existingEntry) {
@@ -349,6 +399,7 @@ export function DeliverySheet({
             .map((l) => ({
               movementId: l.movementId,
               productId: l.productId,
+              unitLabel: l.unitLabel,
               quantity: l.quantity,
             })),
           supplierId,
@@ -363,6 +414,7 @@ export function DeliverySheet({
                 ? {
                     kind: "existing",
                     productId: l.productId,
+                    unitLabel: l.unitLabel,
                     quantity: l.quantity,
                   }
                 : {
@@ -487,7 +539,7 @@ export function DeliverySheet({
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
-                      ×{l.quantity}
+                      ×{l.quantity} {l.unitLabel}
                     </span>
                   </div>
                 </div>
@@ -539,6 +591,20 @@ export function DeliverySheet({
                         className="w-16 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
                       />
                     </>
+                  )}
+                  {l.kind === "existing" && l.product.units.length > 1 && (
+                    <select
+                      value={l.unitLabel}
+                      onChange={(e) => setLineUnit(l.key, e.target.value)}
+                      aria-label={`Unit for ${l.product.name}`}
+                      className="rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+                    >
+                      {l.product.units.map((u) => (
+                        <option key={u.label} value={u.label}>
+                          {u.label}
+                        </option>
+                      ))}
+                    </select>
                   )}
                   <button
                     type="button"

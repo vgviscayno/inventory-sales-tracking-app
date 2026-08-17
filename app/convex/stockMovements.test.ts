@@ -491,6 +491,146 @@ test("editEntry drives a delivery's product negative when a line is lowered, and
   await expectCacheMatchesLedger(t, coke);
 });
 
+const EGGS_UNITS = [
+  { label: "piece", baseEquivalent: 1, price: 8 },
+  { label: "tray", baseEquivalent: 30, price: 220 },
+];
+
+test("editEntry rejects an in-place Unit change on a surviving line", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 2 },
+    ],
+  });
+  const [line] = (await t.query(api.deliveries.list, {}))[0].lines;
+
+  await expect(
+    t.mutation(api.stockMovements.editEntry, {
+      entry: { type: "delivery", entryId: deliveryId },
+      lines: [
+        {
+          movementId: line.movementId,
+          productId: eggs,
+          unitLabel: "piece",
+          quantity: 2,
+        },
+      ],
+    }),
+  ).rejects.toThrow(/Unit can't change/);
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("editEntry treats a Unit change as dropping the old line and inserting a new one", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 2 },
+    ],
+  });
+
+  // No movementId on the new line — the sheet's way of saying "this line's
+  // Unit changed", which the mutation handles as a drop-and-insert.
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+    lines: [{ productId: eggs, unitLabel: "piece", quantity: 12 }],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 12, // the 2-tray line reversed, 12 pieces added
+  });
+  const entry = (await t.query(api.deliveries.list, {}))[0];
+  expect(entry.lines).toMatchObject([{ unitLabel: "piece", unitQuantity: 12 }]);
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("editEntry's below-zero warning nets a delivery edit across two Units for one product", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 2 },
+      { kind: "existing", productId: eggs, unitLabel: "piece", quantity: 5 },
+    ],
+  });
+  // 65 on hand from the delivery, then 60 pulled out elsewhere — 5 left.
+  await t.mutation(api.pullouts.create, {
+    lines: [{ productId: eggs, quantity: 60 }],
+    reasonCategory: "damaged",
+  });
+  const lines = (await t.query(api.deliveries.list, {}))[0].lines;
+  const trayLine = lines.find((l) => l.unitLabel === "tray");
+  const pieceLine = lines.find((l) => l.unitLabel === "piece");
+  if (!trayLine || !pieceLine) throw new Error("Missing a line");
+
+  // Lowering the tray line to 1 (-30) and the piece line to 1 (-4) nets -34
+  // against the 5 left — below zero, even though neither line alone reads
+  // that way against the delivery's own original quantities.
+  await expect(
+    t.mutation(api.stockMovements.editEntry, {
+      entry: { type: "delivery", entryId: deliveryId },
+      lines: [
+        { movementId: trayLine.movementId, productId: eggs, quantity: 1 },
+        { movementId: pieceLine.movementId, productId: eggs, quantity: 1 },
+      ],
+    }),
+  ).rejects.toThrow(/Eggs/);
+
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+    lines: [
+      { movementId: trayLine.movementId, productId: eggs, quantity: 1 },
+      { movementId: pieceLine.movementId, productId: eggs, quantity: 1 },
+    ],
+    allowNegative: true,
+  });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: -29, // 5 - 30 - 4
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("deleteEntry reverses a delivery recorded in a non-Base Unit exactly", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 10, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 3 },
+    ],
+  });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 100, // 10 + 3 * 30
+  });
+
+  await t.mutation(api.stockMovements.deleteEntry, {
+    entry: { type: "delivery", entryId: deliveryId },
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 10, // back to exactly where it was
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
 test("editEntry updates a pull-out's reason across every one of its lines", async () => {
   const t = setupTest();
   const coke = await aProductHolding(t, 20);
