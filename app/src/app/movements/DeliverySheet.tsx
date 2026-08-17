@@ -154,29 +154,16 @@ export function DeliverySheet({
     const product = allProducts.find((p) => p._id === productId);
     const unitLabel = product?.defaultUnit.label ?? product?.baseUnitLabel;
     if (!unitLabel) return;
-    setLines((prev) => {
-      const existing = prev.find(
-        (l) =>
-          l.kind === "existing" &&
-          l.productId === productId &&
-          l.unitLabel === unitLabel,
-      );
-      if (existing) {
-        return prev.map((l) =>
-          l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l,
-        );
-      }
-      return [
-        ...prev,
-        {
-          kind: "existing",
-          key: `${productId}:${unitLabel}`,
-          productId,
-          unitLabel,
-          quantity: 1,
-        },
-      ];
-    });
+    setLines((prev) => [
+      ...prev,
+      {
+        kind: "existing",
+        key: `${productId}:${Date.now()}`,
+        productId,
+        unitLabel,
+        quantity: 1,
+      },
+    ]);
     setSearch("");
   }
 
