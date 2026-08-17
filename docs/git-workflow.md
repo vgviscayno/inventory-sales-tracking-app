@@ -15,6 +15,22 @@ Where a branch is cut from depends on what it is:
 | Mid-build discovery | the project branch tip | nowhere — deleted |
 | Everything else (docs, tooling, unrelated bugs) | `dev` | `dev` |
 
+## Deployments
+
+Every Vercel build deploys that same commit's Convex functions, because the build command is `npx convex deploy --cmd 'npm run build'` (in `app/vercel.json`). Which Convex backend it targets follows from the `CONVEX_DEPLOY_KEY` Vercel hands the build:
+
+| Vercel environment | Convex backend |
+| --- | --- |
+| Production (`main`) | the project's production deployment |
+| Preview (every other branch, `dev` included) | a per-branch `preview/<branch>` deployment, created on first build |
+
+Two consequences for anyone testing on a preview:
+
+- A `preview/<branch>` backend starts with an **empty database**. Data you enter there belongs to that branch alone.
+- It is **deleted 5 days after it was created**, `preview/dev` included. Long-lived test data on a preview does not survive; re-enter it, or import a snapshot (`npx convex export`, then `npx convex import --preview-name preview/dev snapshot.zip`).
+
+`npx convex dev` is for local development only. It is not part of getting a preview deployment to work — if a preview looks broken, read the Vercel build log's `convex deploy` step rather than pushing functions from your machine.
+
 ## Project branches
 
 A Linear project whose tickets carry the `build` label gets a long-lived **project branch**, named `project/<short-slug>` — e.g. `project/stock-movements`. The slug is hand-picked and deliberately unlike Linear's generated branch names, so the integration line stands out in `git branch`.
