@@ -631,6 +631,142 @@ test("deleteEntry reverses a delivery recorded in a non-Base Unit exactly", asyn
   await expectCacheMatchesLedger(t, eggs);
 });
 
+test("editEntry rejects an in-place Unit change on a surviving pull-out line", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 100, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [{ productId: eggs, unitLabel: "tray", quantity: 2 }],
+    reasonCategory: "damaged",
+  });
+  const [line] = (await t.query(api.pullouts.list, {}))[0].lines;
+
+  await expect(
+    t.mutation(api.stockMovements.editEntry, {
+      entry: { type: "pullout", entryId: pulloutId },
+      lines: [
+        {
+          movementId: line.movementId,
+          productId: eggs,
+          unitLabel: "piece",
+          quantity: 2,
+        },
+      ],
+      reasonCategory: "damaged",
+    }),
+  ).rejects.toThrow(/Unit can't change/);
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("editEntry treats a pull-out line's Unit change as dropping the old line and inserting a new one", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 100, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [{ productId: eggs, unitLabel: "tray", quantity: 2 }],
+    reasonCategory: "damaged",
+  });
+
+  // No movementId on the new line — the sheet's way of saying "this line's
+  // Unit changed", which the mutation handles as a drop-and-insert.
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "pullout", entryId: pulloutId },
+    lines: [{ productId: eggs, unitLabel: "piece", quantity: 12 }],
+    reasonCategory: "damaged",
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 88, // 100 - 2 trays (-60), then the tray line reversed (+60) - 12 pieces pulled
+  });
+  const entry = (await t.query(api.pullouts.list, {}))[0];
+  expect(entry.lines).toMatchObject([
+    { unitLabel: "piece", unitQuantity: -12 },
+  ]);
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("editEntry's below-zero warning nets a pull-out edit across two Units for one product", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 40, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [
+      { productId: eggs, unitLabel: "tray", quantity: 1 },
+      { productId: eggs, unitLabel: "piece", quantity: 5 },
+    ],
+    reasonCategory: "damaged",
+    allowNegative: true, // 40 - 30 - 5 = 5 on hand
+  });
+  const lines = (await t.query(api.pullouts.list, {}))[0].lines;
+  const trayLine = lines.find((l) => l.unitLabel === "tray");
+  const pieceLine = lines.find((l) => l.unitLabel === "piece");
+  if (!trayLine || !pieceLine) throw new Error("Missing a line");
+
+  // Raising the tray line from 1 to 2 (-30 more) and the piece line from 5
+  // to 6 (-1 more) nets -31 against the 5 left — below zero, even though
+  // neither line alone reads that way against the pull-out's own original
+  // quantities.
+  await expect(
+    t.mutation(api.stockMovements.editEntry, {
+      entry: { type: "pullout", entryId: pulloutId },
+      lines: [
+        { movementId: trayLine.movementId, productId: eggs, quantity: 2 },
+        { movementId: pieceLine.movementId, productId: eggs, quantity: 6 },
+      ],
+      reasonCategory: "damaged",
+    }),
+  ).rejects.toThrow(/Eggs/);
+
+  await t.mutation(api.stockMovements.editEntry, {
+    entry: { type: "pullout", entryId: pulloutId },
+    lines: [
+      { movementId: trayLine.movementId, productId: eggs, quantity: 2 },
+      { movementId: pieceLine.movementId, productId: eggs, quantity: 6 },
+    ],
+    reasonCategory: "damaged",
+    allowNegative: true,
+  });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: -26, // 5 - 30 - 1
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("deleteEntry reverses a pull-out recorded in a non-Base Unit exactly", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 100, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [{ productId: eggs, unitLabel: "tray", quantity: 3 }],
+    reasonCategory: "damaged",
+  });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 10, // 100 - 3 * 30
+  });
+
+  await t.mutation(api.stockMovements.deleteEntry, {
+    entry: { type: "pullout", entryId: pulloutId },
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 100, // back to exactly where it was
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
 test("editEntry updates a pull-out's reason across every one of its lines", async () => {
   const t = setupTest();
   const coke = await aProductHolding(t, 20);
