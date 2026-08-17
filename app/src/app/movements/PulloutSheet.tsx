@@ -17,15 +17,23 @@ import { findOversold } from "../../../convex/oversold";
 
 // `key` is the movement's own id when this line was prefilled from an entry
 // under edit, so two lines touching the same product stay distinct rather
-// than colliding on `productId`; a freshly added line falls back to
-// `productId`, which is fine because adding an already-present product
-// merges into its existing line rather than creating a second one.
+// than colliding on `productId`; a freshly added line gets a synthetic key
+// instead, since adding an already-present product always appends a new line
+// rather than merging into one — the same fix DeliverySheet needed once a
+// product could carry the same line twice in two different Units.
+//
+// `quantity` is a count in the line's own `unitLabel`, not a Base amount —
+// "5 trays" stays "5". Changing the Unit on a prefilled line clears its
+// `movementId` (and `originalBaseAmount`) rather than patching it in place,
+// same as DeliverySheet's `setLineUnit` — see that file's `Line` doc comment
+// for why.
 type Line = {
   key: string;
   movementId?: Id<"stockMovements">;
   productId: Id<"products">;
+  unitLabel: string;
   quantity: number;
-  originalQuantity?: number;
+  originalBaseAmount?: number;
   deletedProductName?: string;
 };
 
@@ -91,8 +99,9 @@ export function PulloutSheet({
         key: l.movementId,
         movementId: l.movementId,
         productId: l.productId,
-        quantity: Math.abs(l.baseAmount),
-        originalQuantity: Math.abs(l.baseAmount),
+        unitLabel: l.unitLabel,
+        quantity: Math.abs(l.unitQuantity),
+        originalBaseAmount: l.baseAmount,
         ...(activeIds.has(l.productId)
           ? {}
           : { deletedProductName: l.productName }),
@@ -112,16 +121,36 @@ export function PulloutSheet({
 
   function addLine(productId: Id<"products">) {
     setWarned(false);
-    setLines((prev) => {
-      const existing = prev.find((l) => l.productId === productId);
-      if (existing) {
-        return prev.map((l) =>
-          l.productId === productId ? { ...l, quantity: l.quantity + 1 } : l,
-        );
-      }
-      return [...prev, { key: productId, productId, quantity: 1 }];
-    });
+    const product = allProducts.find((p) => p._id === productId);
+    const unitLabel = product?.defaultUnit.label ?? product?.baseUnitLabel;
+    if (!unitLabel) return;
+    // Always appends a new line rather than merging into an existing one for
+    // the same product — a second line for it may need a different Unit.
+    setLines((prev) => [
+      ...prev,
+      { key: `${productId}:${Date.now()}`, productId, unitLabel, quantity: 1 },
+    ]);
     setSearch("");
+  }
+
+  function setLineUnit(key: string, unitLabel: string) {
+    setWarned(false);
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key === key
+          ? {
+              ...l,
+              unitLabel,
+              // See the `Line` type's doc comment: the Unit and its
+              // Base-equivalent snapshot are one unit of change server-side,
+              // so this turns the line into a fresh insert rather than an
+              // in-place patch `editEntry` would refuse.
+              movementId: undefined,
+              originalBaseAmount: undefined,
+            }
+          : l,
+      ),
+    );
   }
 
   function bump(key: string, by: number) {
@@ -155,6 +184,17 @@ export function PulloutSheet({
     return product ? [{ ...line, product, deleted: false }] : [];
   });
 
+  function lineBaseAmount(
+    product: (typeof allProducts)[number],
+    unitLabel: string,
+    quantity: number,
+  ) {
+    const unit =
+      product.units.find((u) => u.label === unitLabel) ??
+      product.units.find((u) => u.label === product.baseUnitLabel);
+    return unit ? Math.round(quantity * unit.baseEquivalent) : quantity;
+  }
+
   // Net delta per product this save would cause, relative to what's already
   // on the ledger — zero for every line while logging a fresh pull-out, since
   // every line there is new. Editing is what can turn a raised or added line
@@ -162,9 +202,15 @@ export function PulloutSheet({
   // what the warning below is judged against, not the raw quantity typed.
   const deltaLines: { productId: Id<"products">; delta: number }[] = [];
   for (const line of resolvedLines) {
+    if (line.deleted) continue;
+    const baseAmount = lineBaseAmount(
+      line.product,
+      line.unitLabel,
+      line.quantity,
+    );
     deltaLines.push({
       productId: line.productId,
-      delta: -(line.quantity - (line.originalQuantity ?? 0)),
+      delta: -baseAmount - (line.originalBaseAmount ?? 0),
     });
   }
   if (existingEntry) {
@@ -273,6 +319,7 @@ export function PulloutSheet({
           lines: resolvedLines.map((l) => ({
             movementId: l.movementId,
             productId: l.productId,
+            unitLabel: l.unitLabel,
             quantity: l.quantity,
           })),
           reasonCategory,
@@ -283,6 +330,7 @@ export function PulloutSheet({
         await createPullout({
           lines: resolvedLines.map((l) => ({
             productId: l.productId,
+            unitLabel: l.unitLabel,
             quantity: l.quantity,
           })),
           reasonCategory,
@@ -418,7 +466,7 @@ export function PulloutSheet({
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
-                        ×{l.quantity}
+                        ×{l.quantity} {l.unitLabel}
                       </span>
                     </div>
                   </div>
@@ -446,6 +494,20 @@ export function PulloutSheet({
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    {l.product.units.length > 1 && (
+                      <select
+                        value={l.unitLabel}
+                        onChange={(e) => setLineUnit(l.key, e.target.value)}
+                        aria-label={`Unit for ${l.product.name}`}
+                        className="rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+                      >
+                        {l.product.units.map((u) => (
+                          <option key={u.label} value={u.label}>
+                            {u.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <button
                       type="button"
                       onClick={() => bump(l.key, -1)}
@@ -478,11 +540,13 @@ export function PulloutSheet({
                     </button>
                   </div>
                 </div>
-                {!isEditing && l.quantity > l.product.quantityOnHand && (
-                  <div className="text-danger text-xs">
-                    Only {l.product.quantityOnHand} on hand
-                  </div>
-                )}
+                {!isEditing &&
+                  lineBaseAmount(l.product, l.unitLabel, l.quantity) >
+                    l.product.quantityOnHand && (
+                    <div className="text-danger text-xs">
+                      Only {l.product.quantityOnHand} on hand
+                    </div>
+                  )}
               </div>
             );
           })}

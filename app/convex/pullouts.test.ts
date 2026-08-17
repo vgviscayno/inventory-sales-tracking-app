@@ -197,6 +197,114 @@ test("pull-outs list newest first, each carrying its lines, reason, and net chan
   });
 });
 
+const EGGS_UNITS = [
+  { label: "piece", baseEquivalent: 1, price: 8 },
+  { label: "tray", baseEquivalent: 30, price: 220 },
+];
+
+test("a pull-out line in a non-Base Unit moves stock by the derived Base amount", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 210, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.pullouts.create, {
+    lines: [{ productId: eggs, unitLabel: "tray", quantity: 5 }],
+    reasonCategory: "damaged",
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 60, // 210 - 5 * 30
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("one pull-out can carry the same product on two lines in two Units, summing the derived amount", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 200, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  const pulloutId = await t.mutation(api.pullouts.create, {
+    lines: [
+      { productId: eggs, unitLabel: "tray", quantity: 5 },
+      { productId: eggs, unitLabel: "piece", quantity: 12 },
+    ],
+    reasonCategory: "expired",
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 38, // 200 - (5 * 30 + 12)
+  });
+  const entry = (await t.query(api.pullouts.list, {})).find(
+    (e) => e._id === pulloutId,
+  );
+  expect(entry?.lines).toHaveLength(2);
+  expect(entry?.netChange).toBe(-162);
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("a pull-out line with no Unit named falls back to the product's Default unit", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 200, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.products.update, {
+    id: eggs,
+    defaultUnitLabel: "tray",
+  });
+
+  await t.mutation(api.pullouts.create, {
+    lines: [{ productId: eggs, quantity: 3 }],
+    reasonCategory: "damaged",
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 110, // 200 - 3 trays, not 3 pieces
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("the below-zero warning sums a Unit-carrying pull-out's lines across the whole entry", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 40, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  // 1 tray (30) + 12 pieces = 42, against 40 on hand — over, even though
+  // neither line alone would be.
+  await expect(
+    t.mutation(api.pullouts.create, {
+      lines: [
+        { productId: eggs, unitLabel: "tray", quantity: 1 },
+        { productId: eggs, unitLabel: "piece", quantity: 12 },
+      ],
+      reasonCategory: "damaged",
+    }),
+  ).rejects.toThrow(/Eggs/);
+
+  await t.mutation(api.pullouts.create, {
+    lines: [
+      { productId: eggs, unitLabel: "tray", quantity: 1 },
+      { productId: eggs, unitLabel: "piece", quantity: 12 },
+    ],
+    reasonCategory: "damaged",
+    allowNegative: true,
+  });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: -2, // 40 - 30 - 12
+  });
+  await expectCacheMatchesLedger(t, eggs);
+});
+
 test("cache tracks the ledger through a mixed delivery and pull-out sequence, including ending negative", async () => {
   const t = setupTest();
   const coke = await aProductHolding(t, 10, { name: "Coke 1.5L" });

@@ -1,12 +1,20 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { findOversold } from "./oversold";
+import { findUnit, resolveDefaultUnitLabel } from "./products";
 import { entryLines, reasonCategory, recordMovement } from "./stockMovements";
 
 export const create = mutation({
   args: {
     lines: v.array(
-      v.object({ productId: v.id("products"), quantity: v.number() }),
+      v.object({
+        productId: v.id("products"),
+        // The Unit this line's quantity is entered in. Omitted falls back to
+        // the product's Default unit, same as `deliveries.create` — a tray
+        // dropped is one tray damaged, not thirty pieces.
+        unitLabel: v.optional(v.string()),
+        quantity: v.number(),
+      }),
     ),
     reasonCategory,
     reasonNotes: v.optional(v.string()),
@@ -36,17 +44,21 @@ export const create = mutation({
       lines.map(async (line) => {
         const product = await ctx.db.get(line.productId);
         if (!product) throw new Error("Product not found");
-        return { line, product };
+        const unitLabel = line.unitLabel ?? resolveDefaultUnitLabel(product);
+        const unit = findUnit(product, unitLabel);
+        const baseAmount = Math.round(line.quantity * unit.baseEquivalent);
+        return { line, product, unitLabel, baseAmount };
       }),
     );
 
     if (!allowNegative) {
-      // Summed per product, so two lines of the same product are judged on
-      // what the pull-out actually takes rather than line by line.
+      // Summed per product, so two lines of the same product — even in two
+      // Units — are judged on what the pull-out actually takes rather than
+      // line by line.
       const oversold = findOversold(
-        lines.map((line) => ({
+        resolvedLines.map(({ line, baseAmount }) => ({
           productId: line.productId,
-          delta: -line.quantity,
+          delta: -baseAmount,
         })),
         resolvedLines.map(({ line, product }) => ({
           productId: line.productId,
@@ -68,12 +80,12 @@ export const create = mutation({
       createdAt: Date.now(),
     });
 
-    for (const { line, product } of resolvedLines) {
+    for (const { line, unitLabel } of resolvedLines) {
       await recordMovement(ctx, {
         type: "pullout",
         refId: pulloutId,
         productId: line.productId,
-        unitLabel: product.baseUnitLabel,
+        unitLabel,
         unitQuantity: line.quantity,
         reasonCategory,
         reasonNotes,
