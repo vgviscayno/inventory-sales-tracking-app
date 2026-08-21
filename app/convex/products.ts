@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { filterLifecycle } from "./lifecycle";
+import { formatStock } from "./remainderReading";
 import { unitValidator } from "./schema";
 
 const DEFAULT_THRESHOLD = 10;
@@ -94,6 +95,25 @@ function validateDefaultUnit(
 }
 
 /**
+ * The Default Unit *object* a product resolves to — `resolveDefaultUnitLabel`
+ * only gives the label. Shared by `withStatus` (every reader) and `remove`
+ * (the delete-gate message), so "unset falls back to the Base unit" stays
+ * decided in exactly one place regardless of which one needs the object.
+ */
+function resolveDefaultUnit<
+  T extends {
+    units: { label: string; baseEquivalent: number; price: number }[];
+    baseUnitLabel: string;
+    defaultUnitLabel?: string;
+  },
+>(product: T) {
+  return (
+    product.units.find((u) => u.label === resolveDefaultUnitLabel(product)) ??
+    product.units[0]
+  );
+}
+
+/**
  * An archived product is never nagging her about restocking it — she's
  * decided she isn't restocking it, that's what archiving means — so it
  * carries no low-stock status at all rather than a status nobody reads.
@@ -111,12 +131,7 @@ function withStatus<
     defaultUnitLabel?: string;
   },
 >(product: T, globalThreshold: number) {
-  // Resolved once here rather than by every reader (the Register grid, the
-  // products list row, the product edit page) so "unset falls back to the
-  // Base unit" has exactly one place it's decided.
-  const defaultUnit =
-    product.units.find((u) => u.label === resolveDefaultUnitLabel(product)) ??
-    product.units[0];
+  const defaultUnit = resolveDefaultUnit(product);
   if (product.archivedAt !== undefined) {
     return { ...product, lowStockStatus: undefined, defaultUnit };
   }
@@ -187,6 +202,7 @@ export const create = mutation({
     baseUnitLabel: v.string(),
     defaultUnitLabel: v.optional(v.string()),
     lowStockThreshold: v.optional(v.number()),
+    remainderReadingEnabled: v.optional(v.boolean()),
   },
   // Always born at zero. Delivery logging is the only way to raise a count,
   // so there is no starting number to take from a caller — and none that the
@@ -229,10 +245,22 @@ export const update = mutation({
     // omitted leaves the existing value untouched (Convex drops `undefined`
     // args before the mutation runs, so `undefined` can't signal "clear").
     lowStockThreshold: v.optional(v.union(v.number(), v.null())),
+    // A plain boolean, not the null-clears/omitted-leaves-untouched pattern
+    // above — there's no third "unset" state to fall back to, so omitted is
+    // the only way to leave it untouched and an explicit value always wins.
+    remainderReadingEnabled: v.optional(v.boolean()),
   },
   handler: async (
     ctx,
-    { id, name, units, baseUnitLabel, defaultUnitLabel, lowStockThreshold },
+    {
+      id,
+      name,
+      units,
+      baseUnitLabel,
+      defaultUnitLabel,
+      lowStockThreshold,
+      remainderReadingEnabled,
+    },
   ) => {
     const patch: {
       name?: string;
@@ -240,10 +268,14 @@ export const update = mutation({
       baseUnitLabel?: string;
       defaultUnitLabel?: string;
       lowStockThreshold?: number;
+      remainderReadingEnabled?: boolean;
     } = {};
     if (name !== undefined) patch.name = name;
     if (lowStockThreshold !== undefined) {
       patch.lowStockThreshold = lowStockThreshold ?? undefined;
+    }
+    if (remainderReadingEnabled !== undefined) {
+      patch.remainderReadingEnabled = remainderReadingEnabled;
     }
 
     const touchesUnits = units !== undefined || baseUnitLabel !== undefined;
@@ -328,8 +360,12 @@ export const remove = mutation({
       throw new Error("Only an archived product can be deleted");
     }
     if (product.quantityOnHand !== 0) {
+      const formattedQuantity = formatStock({
+        ...product,
+        defaultUnit: resolveDefaultUnit(product),
+      });
       throw new Error(
-        `${product.quantityOnHand} still on hand — pull them out first`,
+        `${formattedQuantity} still on hand — pull them out first`,
       );
     }
     await ctx.db.patch(id, { deletedAt: Date.now() });
