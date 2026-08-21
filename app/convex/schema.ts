@@ -29,6 +29,12 @@ export default defineSchema({
     defaultUnitLabel: v.optional(v.string()),
     quantityOnHand: v.number(),
     lowStockThreshold: v.optional(v.number()),
+    // Per-product opt-in: every stock figure for this product reads as a
+    // whole count of the Default unit plus what's left over in Base units
+    // ("10 trays, 5 pcs") instead of a plain Base-unit number. See
+    // CONTEXT.md's "Remainder reading" and remainderReading.ts — this only
+    // changes how a quantity is read, never how it's held. Absent means off.
+    remainderReadingEnabled: v.optional(v.boolean()),
     // Uniform two-state lifecycle, absent meaning active. Only `archivedAt`
     // is exercised in this ticket — `deletedAt` lands with it as one schema
     // edit so soft-delete (the next ticket) doesn't need a second migration.
