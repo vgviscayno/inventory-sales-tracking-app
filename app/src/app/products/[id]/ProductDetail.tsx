@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { formatStock } from "../../../../convex/remainderReading";
 import { formatTime, signed } from "../../format";
 import { DeliverySheet } from "../../movements/DeliverySheet";
 import { PulloutSheet } from "../../movements/PulloutSheet";
@@ -77,6 +78,13 @@ function ProductForm({ product }: { product: Product }) {
     product.units.length > 1 ? product.defaultUnit.label : null;
   const savedThreshold =
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "";
+  const savedRemainderReadingEnabled = product.remainderReadingEnabled ?? false;
+  // Same condition `readQuantity`'s own degenerate case checks: a Default
+  // unit no coarser than the Base unit has nothing to decompose into, so the
+  // toggle would change nothing — hidden for the same reason a single-Unit
+  // product's is.
+  const remainderReadingApplicable =
+    product.units.length > 1 && product.defaultUnit.baseEquivalent > 1;
 
   const [name, setName] = useState(savedName);
   const [units, setUnits] = useState<UnitDraft[]>(savedUnits);
@@ -85,6 +93,9 @@ function ProductForm({ product }: { product: Product }) {
     savedDefault,
   );
   const [lowStockThreshold, setLowStockThreshold] = useState(savedThreshold);
+  const [remainderReadingEnabled, setRemainderReadingEnabled] = useState(
+    savedRemainderReadingEnabled,
+  );
   const [saving, setSaving] = useState(false);
   // The mutation's refusals — a locked Base unit above all — are the whole
   // point of some of these edits, so a rejected save has to surface its reason
@@ -100,14 +111,19 @@ function ProductForm({ product }: { product: Product }) {
   // even though the button is already disabled until the count is zero.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isArchived = product.archivedAt != null;
+  // How this product's quantity reads everywhere on this screen — one
+  // resolution so the field, the delete-gate mirror, and the archive confirm
+  // never show two different denominations at once (see CONTEXT.md's
+  // "Remainder reading").
+  const formattedQuantity = formatStock(product);
   // Mirrors the server's gate (see `products.remove`) so what the button
   // shows and what it's actually allowed to do never disagree.
   const deleteBlockedReason =
     product.quantityOnHand === 0
       ? null
       : product.quantityOnHand > 0
-        ? `${product.quantityOnHand} still on hand — pull them out first`
-        : `${product.quantityOnHand} on hand — recount to fix before deleting`;
+        ? `${formattedQuantity} still on hand — pull them out first`
+        : `${formattedQuantity} on hand — recount to fix before deleting`;
   // Which entry a ledger row tap opened, if any — opening rows have no
   // `refId` and so never set this.
   const [openEntry, setOpenEntry] = useState<
@@ -127,11 +143,14 @@ function ProductForm({ product }: { product: Product }) {
     baseUnitLabel !== savedBaseUnitLabel;
   const defaultDirty = defaultUnitLabel !== savedDefault;
   const thresholdDirty = lowStockThreshold !== savedThreshold;
+  const remainderReadingDirty =
+    remainderReadingEnabled !== savedRemainderReadingEnabled;
   const dirtyCount = [
     nameDirty,
     unitsDirty,
     defaultDirty,
     thresholdDirty,
+    remainderReadingDirty,
   ].filter(Boolean).length;
   const isDirty = dirtyCount > 0;
 
@@ -222,6 +241,7 @@ function ProductForm({ product }: { product: Product }) {
           ? { defaultUnitLabel: defaultUnitLabel?.trim() ?? null }
           : {}),
         lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
+        ...(remainderReadingDirty ? { remainderReadingEnabled } : {}),
       });
       // Canonicalize the local drafts to exactly what the reactive query will
       // hand back, so every dirty mark clears instead of relying on the typed
@@ -328,7 +348,7 @@ function ProductForm({ product }: { product: Product }) {
         <div>
           <div className="text-sub block text-[13px] mb-1">Qty on hand</div>
           <div className="px-2.5 py-2.5 text-[15px] font-semibold">
-            {product.quantityOnHand} {product.baseUnitLabel}
+            {formattedQuantity}
           </div>
         </div>
         <Link href="/movements" className="text-accent block text-[13px]">
@@ -366,6 +386,28 @@ function ProductForm({ product }: { product: Product }) {
             className={fieldInputClass(thresholdDirty)}
           />
         </DiffField>
+        {remainderReadingApplicable && (
+          <div
+            className={
+              remainderReadingDirty
+                ? "rounded-r-lg border-l-[3px] border-amber-400 bg-amber-50/60 py-1.5 pl-2.5"
+                : undefined
+            }
+          >
+            <label className="flex items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={remainderReadingEnabled}
+                onChange={(e) => setRemainderReadingEnabled(e.target.checked)}
+              />
+              <span>
+                Read stock as whole {product.defaultUnit.label} plus leftover{" "}
+                {product.baseUnitLabel} (e.g. "10 {product.defaultUnit.label}, 5{" "}
+                {product.baseUnitLabel}")
+              </span>
+            </label>
+          </div>
+        )}
         {isArchived ? (
           <span className="pill archived inline-block">Archived</span>
         ) : (
@@ -463,7 +505,7 @@ function ProductForm({ product }: { product: Product }) {
             {archiving
               ? "Archiving..."
               : confirmingArchive
-                ? `Confirm Archive (${product.quantityOnHand} in stock)`
+                ? `Confirm Archive (${formattedQuantity} in stock)`
                 : "Archive Product"}
           </button>
         </div>

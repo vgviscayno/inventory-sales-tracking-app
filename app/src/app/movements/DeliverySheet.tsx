@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { findOversold } from "../../../convex/oversold";
+import { formatStock } from "../../../convex/remainderReading";
 import { SupplierPicker } from "../SupplierPicker";
 
 // A line either names a product that already exists, or (once "+ Add as new
@@ -480,7 +481,7 @@ export function DeliverySheet({
               >
                 <span>{p.name}</span>
                 <span className="text-sub text-[13px]">
-                  {p.quantityOnHand} on hand
+                  {formatStock(p)} on hand
                 </span>
               </button>
             ))}

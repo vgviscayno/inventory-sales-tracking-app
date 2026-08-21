@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { findOversold } from "../../../convex/oversold";
+import { formatStock } from "../../../convex/remainderReading";
 
 // `key` is the movement's own id when this line was prefilled from an entry
 // under edit, so two lines touching the same product stay distinct rather
@@ -435,7 +436,7 @@ export function PulloutSheet({
               >
                 <span>{p.name}</span>
                 <span className="text-sub text-[13px]">
-                  {p.quantityOnHand} on hand
+                  {formatStock(p)} on hand
                 </span>
               </button>
             ))}
@@ -544,7 +545,7 @@ export function PulloutSheet({
                   lineBaseAmount(l.product, l.unitLabel, l.quantity) >
                     l.product.quantityOnHand && (
                     <div className="text-danger text-xs">
-                      Only {l.product.quantityOnHand} on hand
+                      Only {formatStock(l.product)} on hand
                     </div>
                   )}
               </div>

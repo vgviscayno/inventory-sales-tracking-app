@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
+import { formatStock } from "../../../convex/remainderReading";
 import { ArchivedSection } from "../ArchivedSection";
 import { StockStatusPill } from "../StockStatusPill";
 
@@ -351,7 +352,7 @@ export default function ProductsPage() {
               <div className="font-semibold">{p.name}</div>
               <div className="text-sub text-[13px]">
                 ₱{p.defaultUnit.price.toFixed(2)}/{p.defaultUnit.label} ·{" "}
-                {p.quantityOnHand} in stock
+                {formatStock(p)} in stock
               </div>
             </div>
             <StockStatusPill status={p.lowStockStatus} />

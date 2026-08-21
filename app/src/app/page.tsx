@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { roundCentavos } from "../../convex/money";
 import { findOversold } from "../../convex/oversold";
+import { formatStock } from "../../convex/remainderReading";
 import { CustomerPicker } from "./CustomerPicker";
 import { StockStatusPill } from "./StockStatusPill";
 
@@ -206,7 +207,7 @@ export default function RegisterPage() {
                 <div className="mb-1 text-sm font-semibold">{p.name}</div>
                 <div className="mb-1.5 flex items-center gap-2">
                   <span className="text-sub text-[12px]">
-                    {p.quantityOnHand} left
+                    {formatStock(p)} left
                   </span>
                   <StockStatusPill status={p.lowStockStatus} />
                 </div>
