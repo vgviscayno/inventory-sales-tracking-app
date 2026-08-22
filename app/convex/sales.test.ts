@@ -221,14 +221,10 @@ test("a sale charges the price at the time, not the price today", async () => {
     paymentMethod: "utang",
     items: [{ productId: coke, unitLabel: "pc", quantity: 2 }],
   });
-  // The Sale's total comes from the price its row snapshotted, and not from the
-  // Unit's live price. This patch moves the live price to prove that.
-  // A `products.update` call would move it the same way today. A correction to
-  // a Unit's price is an ordinary edit now.
-  await t.run(async (ctx) => {
-    await ctx.db.patch(coke, {
-      units: [{ label: "pc", baseEquivalent: 1, price: 90 }],
-    });
+  // The pc goes up from ₱75 to ₱90. That is a price rise, and not a migration.
+  await t.mutation(api.products.update, {
+    id: coke,
+    units: [{ label: "pc", baseEquivalent: 1, price: 90 }],
   });
 
   expect(
