@@ -6,6 +6,8 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { roundCentavos } from "../../convex/money";
 import { findOversold } from "../../convex/oversold";
+import { formatStock } from "../../convex/remainderReading";
+import { unitLabelFor } from "../../convex/unitLabels";
 import { CustomerPicker } from "./CustomerPicker";
 import { StockStatusPill } from "./StockStatusPill";
 
@@ -206,7 +208,7 @@ export default function RegisterPage() {
                 <div className="mb-1 text-sm font-semibold">{p.name}</div>
                 <div className="mb-1.5 flex items-center gap-2">
                   <span className="text-sub text-[12px]">
-                    {p.quantityOnHand} left
+                    {formatStock(p)} left
                   </span>
                   <StockStatusPill status={p.lowStockStatus} />
                 </div>
@@ -318,7 +320,10 @@ export default function RegisterPage() {
                     <div>
                       {l.product.name}
                       {l.product.units.length > 1 && (
-                        <span className="text-sub"> · {l.unitLabel}</span>
+                        <span className="text-sub">
+                          {" "}
+                          · {unitLabelFor(l.quantity, l.unitLabel)}
+                        </span>
                       )}
                     </div>
                     <div className="text-sub text-[13px]">
@@ -326,7 +331,7 @@ export default function RegisterPage() {
                     </div>
                     {oversoldProductIds.has(l.productId) && (
                       <div className="text-danger text-xs">
-                        Only {l.product.quantityOnHand} on hand
+                        Only {formatStock(l.product)} on hand
                       </div>
                     )}
                   </div>
@@ -408,8 +413,8 @@ export default function RegisterPage() {
                   {oversold.map(({ productId, product, projected }) => (
                     <li key={productId}>
                       <span className="font-semibold">{product.name}</span> —
-                      only {product.quantityOnHand} on hand, this sale leaves{" "}
-                      {projected}
+                      only {formatStock(product)} on hand, this sale leaves{" "}
+                      {formatStock({ ...product, quantityOnHand: projected })}
                     </li>
                   ))}
                 </ul>

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { filterLifecycle } from "./lifecycle";
+import { formatStock } from "./remainderReading";
 import { unitValidator } from "./schema";
 
 const DEFAULT_THRESHOLD = 10;
@@ -94,6 +95,27 @@ function validateDefaultUnit(
 }
 
 /**
+ * The Default Unit *object* a product resolves to — `resolveDefaultUnitLabel`
+ * only gives the label. `withStatus` attaches it to every product a reader
+ * gets, so the price a listing quotes and the Unit a movement preselects both
+ * come off one resolution of "unset falls back to the Base unit". It has no
+ * say in how stock *reads* — that is the Reading ladder's job now
+ * (remainderReading.ts).
+ */
+function resolveDefaultUnit<
+  T extends {
+    units: { label: string; baseEquivalent: number; price: number }[];
+    baseUnitLabel: string;
+    defaultUnitLabel?: string;
+  },
+>(product: T) {
+  return (
+    product.units.find((u) => u.label === resolveDefaultUnitLabel(product)) ??
+    product.units[0]
+  );
+}
+
+/**
  * An archived product is never nagging her about restocking it — she's
  * decided she isn't restocking it, that's what archiving means — so it
  * carries no low-stock status at all rather than a status nobody reads.
@@ -111,12 +133,7 @@ function withStatus<
     defaultUnitLabel?: string;
   },
 >(product: T, globalThreshold: number) {
-  // Resolved once here rather than by every reader (the Register grid, the
-  // products list row, the product edit page) so "unset falls back to the
-  // Base unit" has exactly one place it's decided.
-  const defaultUnit =
-    product.units.find((u) => u.label === resolveDefaultUnitLabel(product)) ??
-    product.units[0];
+  const defaultUnit = resolveDefaultUnit(product);
   if (product.archivedAt !== undefined) {
     return { ...product, lowStockStatus: undefined, defaultUnit };
   }
@@ -187,6 +204,10 @@ export const create = mutation({
     baseUnitLabel: v.string(),
     defaultUnitLabel: v.optional(v.string()),
     lowStockThreshold: v.optional(v.number()),
+    // The Reading ladder, same posture as in `update`: labels are stored as
+    // given and resolved on every read, so nothing here has to be kept in
+    // step with a later Unit rename or removal.
+    denominationLabels: v.optional(v.array(v.string())),
   },
   // Always born at zero. Delivery logging is the only way to raise a count,
   // so there is no starting number to take from a caller — and none that the
@@ -229,10 +250,26 @@ export const update = mutation({
     // omitted leaves the existing value untouched (Convex drops `undefined`
     // args before the mutation runs, so `undefined` can't signal "clear").
     lowStockThreshold: v.optional(v.union(v.number(), v.null())),
+    // The Reading ladder. An empty array is the clear — it already means
+    // "read plainly", so unlike the two fields above this needs no null; an
+    // explicit value always wins, and omitted leaves it untouched. Labels are
+    // stored as given: which ones actually count, and in what order, is
+    // decided on every read by `buildReadingLadder` rather than at write time,
+    // so a Unit renamed or deleted later degrades the reading instead of
+    // leaving a wrong one stored.
+    denominationLabels: v.optional(v.array(v.string())),
   },
   handler: async (
     ctx,
-    { id, name, units, baseUnitLabel, defaultUnitLabel, lowStockThreshold },
+    {
+      id,
+      name,
+      units,
+      baseUnitLabel,
+      defaultUnitLabel,
+      lowStockThreshold,
+      denominationLabels,
+    },
   ) => {
     const patch: {
       name?: string;
@@ -240,10 +277,14 @@ export const update = mutation({
       baseUnitLabel?: string;
       defaultUnitLabel?: string;
       lowStockThreshold?: number;
+      denominationLabels?: string[];
     } = {};
     if (name !== undefined) patch.name = name;
     if (lowStockThreshold !== undefined) {
       patch.lowStockThreshold = lowStockThreshold ?? undefined;
+    }
+    if (denominationLabels !== undefined) {
+      patch.denominationLabels = denominationLabels;
     }
 
     const touchesUnits = units !== undefined || baseUnitLabel !== undefined;
@@ -328,8 +369,9 @@ export const remove = mutation({
       throw new Error("Only an archived product can be deleted");
     }
     if (product.quantityOnHand !== 0) {
+      const formattedQuantity = formatStock(product);
       throw new Error(
-        `${product.quantityOnHand} still on hand — pull them out first`,
+        `${formattedQuantity} still on hand — pull them out first`,
       );
     }
     await ctx.db.patch(id, { deletedAt: Date.now() });

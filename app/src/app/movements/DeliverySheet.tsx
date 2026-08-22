@@ -17,6 +17,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { findOversold } from "../../../convex/oversold";
+import { formatStock } from "../../../convex/remainderReading";
+import { formatCount } from "../../../convex/unitLabels";
 import { SupplierPicker } from "../SupplierPicker";
 
 // A line either names a product that already exists, or (once "+ Add as new
@@ -480,7 +482,7 @@ export function DeliverySheet({
               >
                 <span>{p.name}</span>
                 <span className="text-sub text-[13px]">
-                  {p.quantityOnHand} on hand
+                  {formatStock(p)} on hand
                 </span>
               </button>
             ))}
@@ -526,7 +528,7 @@ export function DeliverySheet({
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
-                      ×{l.quantity} {l.unitLabel}
+                      ×{formatCount(l.quantity, l.unitLabel)}
                     </span>
                   </div>
                 </div>
@@ -653,8 +655,8 @@ export function DeliverySheet({
                 {oversold.map(({ productId, product, projected }) => (
                   <li key={productId}>
                     <span className="font-semibold">{product.name}</span> —
-                    currently {product.quantityOnHand}, deleting leaves{" "}
-                    {projected}
+                    currently {formatStock(product)}, deleting leaves{" "}
+                    {formatStock({ ...product, quantityOnHand: projected })}
                   </li>
                 ))}
               </ul>
@@ -677,8 +679,8 @@ export function DeliverySheet({
               {oversold.map(({ productId, product, projected }) => (
                 <li key={productId}>
                   <span className="font-semibold">{product.name}</span> —
-                  currently {product.quantityOnHand}, this edit leaves{" "}
-                  {projected}
+                  currently {formatStock(product)}, this edit leaves{" "}
+                  {formatStock({ ...product, quantityOnHand: projected })}
                 </li>
               ))}
             </ul>
@@ -747,8 +749,9 @@ export function DeliverySheet({
                   {deleteOversold.map(({ productId, product, projected }) => (
                     <li key={productId}>
                       <span className="font-semibold">{product.name}</span> —
-                      currently {product.quantityOnHand}, deleting this entry
-                      leaves {projected}
+                      currently {formatStock(product)}, deleting this entry
+                      leaves{" "}
+                      {formatStock({ ...product, quantityOnHand: projected })}
                     </li>
                   ))}
                 </ul>

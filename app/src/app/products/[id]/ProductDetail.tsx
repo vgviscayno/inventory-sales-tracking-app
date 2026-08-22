@@ -7,12 +7,17 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import {
+  formatStock,
+  selectableDenominations,
+} from "../../../../convex/remainderReading";
 import { formatTime, signed } from "../../format";
 import { DeliverySheet } from "../../movements/DeliverySheet";
 import { PulloutSheet } from "../../movements/PulloutSheet";
 import { SaleEntrySheet } from "../../movements/SaleEntrySheet";
 import { StockStatusPill } from "../../StockStatusPill";
 import { WindowedDayList } from "../../WindowedDayList";
+import { ReadingLadderField } from "../ReadingLadderField";
 
 // Derived from the query rather than restated, so a new field — or a new stock
 // status — reaches this form without anyone remembering to widen a type here.
@@ -77,6 +82,7 @@ function ProductForm({ product }: { product: Product }) {
     product.units.length > 1 ? product.defaultUnit.label : null;
   const savedThreshold =
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "";
+  const savedDenominationLabels = product.denominationLabels ?? [];
 
   const [name, setName] = useState(savedName);
   const [units, setUnits] = useState<UnitDraft[]>(savedUnits);
@@ -85,6 +91,12 @@ function ProductForm({ product }: { product: Product }) {
     savedDefault,
   );
   const [lowStockThreshold, setLowStockThreshold] = useState(savedThreshold);
+  // The Reading ladder, held as the set of ticked labels. Order isn't kept
+  // because it isn't read: `buildReadingLadder` sorts by descending Base
+  // equivalent regardless of what was ticked when.
+  const [denominationLabels, setDenominationLabels] = useState<string[]>(
+    savedDenominationLabels,
+  );
   const [saving, setSaving] = useState(false);
   // The mutation's refusals — a locked Base unit above all — are the whole
   // point of some of these edits, so a rejected save has to surface its reason
@@ -100,14 +112,19 @@ function ProductForm({ product }: { product: Product }) {
   // even though the button is already disabled until the count is zero.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isArchived = product.archivedAt != null;
+  // How this product's quantity reads everywhere on this screen — one
+  // resolution so the field, the delete-gate mirror, and the archive confirm
+  // never show two different denominations at once (see CONTEXT.md's
+  // "Remainder reading").
+  const formattedQuantity = formatStock(product);
   // Mirrors the server's gate (see `products.remove`) so what the button
   // shows and what it's actually allowed to do never disagree.
   const deleteBlockedReason =
     product.quantityOnHand === 0
       ? null
       : product.quantityOnHand > 0
-        ? `${product.quantityOnHand} still on hand — pull them out first`
-        : `${product.quantityOnHand} on hand — recount to fix before deleting`;
+        ? `${formattedQuantity} still on hand — pull them out first`
+        : `${formattedQuantity} on hand — recount to fix before deleting`;
   // Which entry a ledger row tap opened, if any — opening rows have no
   // `refId` and so never set this.
   const [openEntry, setOpenEntry] = useState<
@@ -127,11 +144,15 @@ function ProductForm({ product }: { product: Product }) {
     baseUnitLabel !== savedBaseUnitLabel;
   const defaultDirty = defaultUnitLabel !== savedDefault;
   const thresholdDirty = lowStockThreshold !== savedThreshold;
+  // Compared as a set: which Units are on the ladder is the whole of the
+  // choice, so re-ticking two boxes in the other order is not an edit.
+  const readingDirty = !sameLabels(denominationLabels, savedDenominationLabels);
   const dirtyCount = [
     nameDirty,
     unitsDirty,
     defaultDirty,
     thresholdDirty,
+    readingDirty,
   ].filter(Boolean).length;
   const isDirty = dirtyCount > 0;
 
@@ -164,10 +185,41 @@ function ProductForm({ product }: { product: Product }) {
 
   const canSave = name.trim().length > 0 && unitsValid;
 
+  // The boxes to offer, asked of the reading itself rather than re-derived
+  // here — the form must never offer a denomination `buildReadingLadder` would drop.
+  // Taken from the drafts rather than the saved product, so ticking a Unit
+  // added, renamed, or re-scaled in this same unsaved edit works. A product
+  // with no coarser Unit at all (a single-Unit one) is never offered the
+  // selector, since its reading is the plain one either way.
+  const denominations = selectableDenominations({
+    units: parsedUnits,
+    baseUnitLabel: baseUnitTrimmed,
+  });
+  // The reading as it would come out if this edit were saved, over the stock
+  // actually on hand. A product holding nothing (or a negative count, which
+  // always reads plainly) has no figure worth previewing, so one of the
+  // coarsest denomination plus one Base unit stands in.
+  const previewAmount =
+    product.quantityOnHand > 0
+      ? product.quantityOnHand
+      : (denominations[0]?.baseEquivalent ?? 0) + 1;
+  const readingPreview = formatStock({
+    units: parsedUnits,
+    baseUnitLabel: baseUnitTrimmed,
+    denominationLabels,
+    quantityOnHand: previewAmount,
+  });
+
   function resetUnits() {
     setUnits(savedUnits);
     setBaseUnitLabel(savedBaseUnitLabel);
     setDefaultUnitLabel(savedDefault);
+  }
+
+  function toggleDenomination(label: string, on: boolean) {
+    setDenominationLabels((labels) =>
+      on ? [...labels, label] : labels.filter((l) => l !== label),
+    );
   }
 
   // Editing a Unit's label has to drag the Base and Default markers along with
@@ -179,6 +231,11 @@ function ProductForm({ product }: { product: Product }) {
     if (field === "label") {
       if (old.label === baseUnitLabel) setBaseUnitLabel(value);
       if (old.label === defaultUnitLabel) setDefaultUnitLabel(value);
+      // The ladder names its denominations by label too, so a rename has to drag them
+      // with it — otherwise the denomination would silently drop off the reading.
+      setDenominationLabels((labels) =>
+        labels.map((l) => (l === old.label ? value : l)),
+      );
     }
   }
 
@@ -195,6 +252,9 @@ function ProductForm({ product }: { product: Product }) {
     setUnits(units.filter((_, i) => i !== index));
     // A removed Default falls back to the Base unit (server does the same).
     if (removed.label === defaultUnitLabel) setDefaultUnitLabel(null);
+    setDenominationLabels((labels) =>
+      labels.filter((l) => l !== removed.label),
+    );
   }
 
   function addUnit() {
@@ -222,6 +282,7 @@ function ProductForm({ product }: { product: Product }) {
           ? { defaultUnitLabel: defaultUnitLabel?.trim() ?? null }
           : {}),
         lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
+        ...(readingDirty ? { denominationLabels } : {}),
       });
       // Canonicalize the local drafts to exactly what the reactive query will
       // hand back, so every dirty mark clears instead of relying on the typed
@@ -328,7 +389,7 @@ function ProductForm({ product }: { product: Product }) {
         <div>
           <div className="text-sub block text-[13px] mb-1">Qty on hand</div>
           <div className="px-2.5 py-2.5 text-[15px] font-semibold">
-            {product.quantityOnHand} {product.baseUnitLabel}
+            {formattedQuantity}
           </div>
         </div>
         <Link href="/movements" className="text-accent block text-[13px]">
@@ -366,6 +427,31 @@ function ProductForm({ product }: { product: Product }) {
             className={fieldInputClass(thresholdDirty)}
           />
         </DiffField>
+        {denominations.length > 0 && (
+          <DiffField
+            label="Read stock in"
+            dirty={readingDirty}
+            was={
+              savedDenominationLabels.length > 0
+                ? savedDenominationLabels.join(", ")
+                : `${savedBaseUnitLabel} only`
+            }
+            onReset={() => setDenominationLabels(savedDenominationLabels)}
+          >
+            {/* Saved Units, so a label is settled enough to key a tick by. */}
+            <ReadingLadderField
+              items={denominations.map((unit) => ({
+                key: unit.label,
+                label: unit.label,
+                checked: denominationLabels.includes(unit.label),
+              }))}
+              baseUnitLabel={baseUnitTrimmed}
+              preview={readingPreview}
+              previewIsExample={product.quantityOnHand <= 0}
+              onToggle={toggleDenomination}
+            />
+          </DiffField>
+        )}
         {isArchived ? (
           <span className="pill archived inline-block">Archived</span>
         ) : (
@@ -463,7 +549,7 @@ function ProductForm({ product }: { product: Product }) {
             {archiving
               ? "Archiving..."
               : confirmingArchive
-                ? `Confirm Archive (${product.quantityOnHand} in stock)`
+                ? `Confirm Archive (${formattedQuantity} in stock)`
                 : "Archive Product"}
           </button>
         </div>
@@ -498,6 +584,17 @@ function ProductForm({ product }: { product: Product }) {
 
 const FIELD_INPUT_BASE =
   "w-full rounded-[10px] border bg-card px-2.5 py-2.5 text-[15px]";
+
+/**
+ * Whether two ladders name the same Units. Order is deliberately not part of
+ * it — the reading sorts its own denominations (see `buildReadingLadder`), so ticking
+ * the same two boxes in the other order has changed nothing to save.
+ */
+function sameLabels(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const inB = new Set(b);
+  return a.every((label) => inB.has(label));
+}
 
 // An edited input gets an amber border + ring so the change is visible even
 // with the field scrolled past its label.

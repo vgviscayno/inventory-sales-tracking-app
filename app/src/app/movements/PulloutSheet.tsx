@@ -14,6 +14,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { findOversold } from "../../../convex/oversold";
+import { formatStock } from "../../../convex/remainderReading";
+import { formatCount } from "../../../convex/unitLabels";
 
 // `key` is the movement's own id when this line was prefilled from an entry
 // under edit, so two lines touching the same product stay distinct rather
@@ -435,7 +437,7 @@ export function PulloutSheet({
               >
                 <span>{p.name}</span>
                 <span className="text-sub text-[13px]">
-                  {p.quantityOnHand} on hand
+                  {formatStock(p)} on hand
                 </span>
               </button>
             ))}
@@ -466,7 +468,7 @@ export function PulloutSheet({
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
-                        ×{l.quantity} {l.unitLabel}
+                        ×{formatCount(l.quantity, l.unitLabel)}
                       </span>
                     </div>
                   </div>
@@ -544,7 +546,7 @@ export function PulloutSheet({
                   lineBaseAmount(l.product, l.unitLabel, l.quantity) >
                     l.product.quantityOnHand && (
                     <div className="text-danger text-xs">
-                      Only {l.product.quantityOnHand} on hand
+                      Only {formatStock(l.product)} on hand
                     </div>
                   )}
               </div>
@@ -572,8 +574,8 @@ export function PulloutSheet({
                 {oversold.map(({ productId, product, projected }) => (
                   <li key={productId}>
                     <span className="font-semibold">{product.name}</span> —
-                    currently {product.quantityOnHand}, deleting leaves{" "}
-                    {projected}
+                    currently {formatStock(product)}, deleting leaves{" "}
+                    {formatStock({ ...product, quantityOnHand: projected })}
                   </li>
                 ))}
               </ul>
@@ -596,8 +598,9 @@ export function PulloutSheet({
               {oversold.map(({ productId, product, projected }) => (
                 <li key={productId}>
                   <span className="font-semibold">{product.name}</span> —
-                  currently {product.quantityOnHand}, this{" "}
-                  {isEditing ? "edit" : "pull-out"} leaves {projected}
+                  currently {formatStock(product)}, this{" "}
+                  {isEditing ? "edit" : "pull-out"} leaves{" "}
+                  {formatStock({ ...product, quantityOnHand: projected })}
                 </li>
               ))}
             </ul>
@@ -667,8 +670,9 @@ export function PulloutSheet({
                   {deleteOversold.map(({ productId, product, projected }) => (
                     <li key={productId}>
                       <span className="font-semibold">{product.name}</span> —
-                      currently {product.quantityOnHand}, deleting this entry
-                      leaves {projected}
+                      currently {formatStock(product)}, deleting this entry
+                      leaves{" "}
+                      {formatStock({ ...product, quantityOnHand: projected })}
                     </li>
                   ))}
                 </ul>

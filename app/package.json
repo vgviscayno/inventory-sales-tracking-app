@@ -15,6 +15,7 @@
     "classnames": "^2.5.1",
     "convex": "^1.42.3",
     "next": "16.2.12",
+    "pluralize": "^8.0.0",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -23,6 +24,7 @@
     "@edge-runtime/vm": "^5.0.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pluralize": "^0.0.33",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "convex-test": "^0.0.54",
