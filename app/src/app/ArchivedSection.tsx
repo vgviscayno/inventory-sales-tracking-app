@@ -3,12 +3,12 @@
 import { useState } from "react";
 
 /**
- * The collapsed Archived section a list-page pattern all lives under: shows
- * its count while collapsed, expands to whatever the caller renders for each
- * archived row. Built generic over its content rather than over "products"
- * specifically, since customers and suppliers will want the identical shape
- * once they grow a lifecycle of their own — but nothing here assumes a
- * second caller yet; it just doesn't foreclose one.
+ * The collapsed Archived section that every list page uses. It shows its count
+ * while collapsed, and it expands to whatever the caller renders for each
+ * archived row.
+ * The component is generic over its content, and not specific to products.
+ * Products, customers, and suppliers each render their own rows through it, and
+ * each carries a lifecycle of its own.
  */
 export function ArchivedSection({
   count,
@@ -16,10 +16,10 @@ export function ArchivedSection({
   children,
 }: {
   count: number;
-  // A line rendered next to the count while the section is collapsed — the
-  // seam customers hangs "total still owed" off of, so that debt sums where
-  // the row that carries it is one tap away, without products (which have no
-  // such total) needing to pass anything.
+  // A line the section renders next to the count while collapsed. Customers
+  // hangs its total still owed off this seam. That total therefore sums where
+  // the row that carries it is one tap away. Products and suppliers have no
+  // such total, and pass nothing.
   subtitle?: React.ReactNode;
   children: React.ReactNode;
 }) {

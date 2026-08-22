@@ -1,8 +1,9 @@
 /**
  * The one place a stock status turns into words and colour. A negative count
- * and a low count are different messages — "this count is wrong, recount"
- * versus "order more" — and they must never drift into looking alike, which is
- * what three hand-rolled copies of this cascade would eventually do.
+ * and a low count carry different messages. One says "this count is wrong,
+ * recount", and the other says "order more". The two must never drift into
+ * looking alike, which is what three hand-rolled copies of this cascade would
+ * eventually do.
  */
 export type StockStatus = "negative" | "low" | "ok";
 
@@ -10,8 +11,8 @@ export function StockStatusPill({
   status,
   className = "",
 }: {
-  // Undefined for an archived product — `products.ts`'s `withStatus` omits
-  // the field there rather than computing a status nobody should read.
+  // `withStatus` in `products.ts` sets `lowStockStatus` to undefined for an
+  // archived product. It does not compute a status nobody should read.
   status: StockStatus | undefined;
   className?: string;
 }) {

@@ -12,16 +12,17 @@ import { CustomerPicker } from "./CustomerPicker";
 import { StockStatusPill } from "./StockStatusPill";
 
 /**
- * A cart holds what she rang up — nothing about the product itself. Name,
- * price and count are read live off the products query at render, so the
- * warning is judged against the count as it stands now, not as it stood when
- * the item was tapped. A stale count is what would let a sale reach the server
- * unwarned, get refused, and strand her at the counter.
+ * A cart holds what somebody rang up, and nothing about the product itself. The
+ * render reads the name, the price, and the count live off the products query.
+ * The warning therefore judges the count as it stands now, and not as it stood
+ * when the item was tapped.
+ * A stale count is what would let a Sale reach the server unwarned. The server
+ * would refuse it, and the person would be stranded at the counter.
  *
- * Keyed by `(productId, unitLabel)`, not `productId` alone — trays and pieces
- * of the same egg are separately countable and separately priced, so tapping
- * a product already in the cart under a different Unit has to open a new
- * line rather than pile onto the existing one.
+ * The key is `(productId, unitLabel)` and not `productId` alone. Trays and
+ * pieces of one egg are separately countable and separately priced. A tap on a
+ * product already in the cart under a different Unit therefore opens a new
+ * Line. It does not pile onto the existing one.
  */
 type CartLine = {
   productId: Id<"products">;
@@ -31,8 +32,8 @@ type CartLine = {
 
 export default function RegisterPage() {
   const [search, setSearch] = useState("");
-  // Unfiltered, and searched client-side: the cart needs live counts for
-  // products the search box has scrolled out of view.
+  // This query filters nothing, and the search runs on the client. The cart
+  // needs live counts for products the search box has scrolled out of view.
   const allProducts = useQuery(api.products.list, {}) ?? [];
   const products = search
     ? allProducts.filter((p) =>
@@ -47,9 +48,10 @@ export default function RegisterPage() {
   const [customerId, setCustomerId] = useState<Id<"customers"> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // Whether she has been shown the below-zero warning yet — the click that sets
-  // it is the warning, and the next one is the consent. Cleared whenever the
-  // cart changes, so consent never carries over to a sale she has not seen.
+  // Whether the person has seen the Negative projection warning yet. The click
+  // that sets this flag is the warning, and the next click is the consent.
+  // A change to the cart clears the flag, so consent never carries over to a
+  // Sale nobody has seen.
   const [warned, setWarned] = useState(false);
 
   function addToCart(
@@ -94,9 +96,10 @@ export default function RegisterPage() {
     );
   }
 
-  // Each cart line joined to the product and the specific Unit it was rung up
-  // in, as they stand right now. A product deleted mid-sale, or a Unit
-  // dropped from it, drops the line from both the display and the save.
+  // This list joins each cart Line to its product and to the specific Unit it
+  // was rung up in. Both stand as they are right now. A product deleted
+  // mid-sale, or a Unit dropped from it, drops the Line from the display and
+  // from the save.
   const lines = cart.flatMap((line) => {
     const product = allProducts.find((p) => p._id === line.productId);
     const unit = product?.units.find((u) => u.label === line.unitLabel);
@@ -107,12 +110,12 @@ export default function RegisterPage() {
     (sum, l) => sum + roundCentavos(l.unit.price * l.quantity),
     0,
   );
-  // Lines this sale would drive below zero, netted per product in Base units
-  // — two lines of one product, in the same Unit or different ones, are
-  // judged on what the sale actually takes off the shelf. They warn — they
-  // never block. The customer is at the counter holding the goods, so
-  // refusing the write buys an unrecorded sale and a permanently wrong utang
-  // balance.
+  // The Negative projections this sale would leave. The check nets the Lines
+  // per product in Base units. Two Lines of one product therefore give one
+  // judgement, whether they name the same Unit or different Units.
+  // A Negative projection warns. It never blocks the save. The customer waits
+  // at the counter with the goods. A refused write costs the shop an
+  // unrecorded sale and a wrong Utang balance.
   const oversold = findOversold(
     lines.map((l) => ({
       productId: l.productId,
@@ -166,10 +169,10 @@ export default function RegisterPage() {
       setWarned(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
-      // The server refused, so it is telling her something the client's counts
-      // did not — stock moved under her between render and save. Arm the
-      // confirm on its message rather than leaving her stuck: the whole point
-      // is that no refusal is ever the last word at the counter.
+      // The server refused, so it knows something the client's counts did not.
+      // Stock moved between the render and the save. The catch arms the confirm
+      // on the server's message, and does not leave the person stuck. No
+      // refusal is ever the last word at the counter.
       setWarned(true);
     } finally {
       setSubmitting(false);
@@ -193,13 +196,15 @@ export default function RegisterPage() {
             const inCartDefault = cartLinesForProduct.find(
               (l) => l.unitLabel === p.defaultUnit.label,
             );
-            // The Default unit taps as one big, obviously-pressable button —
-            // the common case, one tap. A multi-Unit product's other Units —
-            // eggs sold by the piece as well as the tray — sit underneath as
-            // smaller buttons for the times she means one of those instead. A
-            // single-Unit product simply has none of those, so it's just the
-            // one button. Each price is spelled out "per <unit>" so what it's
-            // priced in reads at a glance.
+            // The Default unit taps as one big button that is obviously
+            // pressable. That is the common case, and it takes one tap.
+            // A multi-Unit product shows its other Units underneath, as smaller
+            // buttons for the times somebody means one of those. Eggs sold by
+            // the piece as well as the tray are such a product.
+            // A single-Unit product has none of those smaller buttons, so it
+            // shows the one button alone.
+            // Each price spells out "per <unit>", so what it is priced in reads
+            // at a glance.
             const otherUnits = p.units.filter(
               (u) => u.label !== p.defaultUnit.label,
             );
@@ -400,10 +405,10 @@ export default function RegisterPage() {
 
             {error && <p className="text-danger text-sm">{error}</p>}
 
-            {/* Only when the client's own counts show the overdraw. On the
-                server-refusal path `oversold` is empty and the error above is
-                the warning — claiming a below-zero line the counts don't show
-                would be a lie. */}
+            {/* This block shows only when the client's own counts show the
+                Negative projection. On the server-refusal path `oversold` is
+                empty, and the error above is the warning. To claim a Negative
+                projection the counts do not show would be a lie. */}
             {warned && oversold.length > 0 && (
               <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
                 <p className="font-semibold text-danger">

@@ -58,8 +58,8 @@ export default function MovementsPage() {
   const pullouts = usePullouts(showPullouts);
   const sales = useSales(includeSales);
 
-  // Every included kind is already newest first, so a stable merge sort keeps
-  // that order intact — reinterleaved only by createdAt across the kinds.
+  // Every included kind arrives newest first, so a stable merge sort keeps that
+  // order intact. The sort only interleaves the kinds by `createdAt`.
   const entries: Entry[] = useMemo(
     () =>
       [
@@ -76,9 +76,9 @@ export default function MovementsPage() {
     [showDeliveries, deliveries, showPullouts, pullouts, includeSales, sales],
   );
 
-  // What sheet is open, if any: logging a fresh entry, or reopening one that
-  // was tapped in the list below — the same two components cover both, see
-  // DeliverySheet's and PulloutSheet's own notes.
+  // This state names which sheet is open, if any. A sheet either logs a fresh
+  // Entry, or reopens one that somebody tapped in the list below. The same two
+  // components cover both. See the notes in DeliverySheet and PulloutSheet.
   const [activeSheet, setActiveSheet] = useState<
     | { mode: "create"; kind: "delivery" | "pullout" }
     | {

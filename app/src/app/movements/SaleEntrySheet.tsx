@@ -1,10 +1,10 @@
 "use client";
 
-// A sale reopened from the Movements tab or a product's ledger — read-only,
-// because a sale's stock and money both flow through the Register's checkout
-// (src/app/page.tsx), and editing it here would let the two drift. This sheet
-// exists so tapping a sale entry lands somewhere instead of nowhere, and
-// tells her where the real edit lives.
+// A Sale reopened from the Movements tab or from a product's Ledger. The sheet
+// is read-only. A Sale's stock and money both flow through the Register's
+// checkout in src/app/page.tsx. An edit here would let the two drift.
+// This sheet exists so a tap on a Sale entry lands somewhere instead of
+// nowhere. It also says where the real edit lives.
 
 import { useQuery } from "convex/react";
 import { useEffect } from "react";

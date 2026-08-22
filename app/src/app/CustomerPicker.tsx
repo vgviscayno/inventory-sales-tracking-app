@@ -5,6 +5,15 @@ import { useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 
+/**
+ * The search-or-add picker for a Sale's customer. SupplierPicker mirrors this
+ * shape, and adds a second query by id that this picker has no need of.
+ * `customers.list` returns active rows only, and nothing here runs a second
+ * query. The app writes a Sale once and never edits it, so there is never a
+ * stored customer to bring back. See SaleEntrySheet, which is read-only.
+ * A customer archived mid-sale therefore falls out of `selected`, and the
+ * picker goes back to its search box.
+ */
 export function CustomerPicker({
   value,
   onChange,

@@ -1,13 +1,13 @@
 "use client";
 
-// Mirrors CustomerPicker's search-or-add shape, plus the one thing a
-// delivery needs that a sale's customer picker never has: an archived
-// supplier can be the one already attached to the delivery under edit.
-// `suppliers.list` only ever returns active rows, so the currently-selected
-// id is fetched separately with `suppliers.get` — which bypasses lifecycle
-// filtering — and merged in here. That's the whole "excluded from search,
-// included by id" rule: no third list mode, just a second query keyed on
-// `value` alone.
+// This picker mirrors CustomerPicker's search-or-add shape. It adds the one
+// thing a Delivery needs and a Sale's customer picker never does. An archived
+// supplier can be the one already attached to the Delivery under edit.
+// `suppliers.list` returns active rows only. A second query, `suppliers.get`,
+// therefore fetches the selected id and merges it in here. That query bypasses
+// the lifecycle filter.
+// This is the whole "excluded from search, included by id" rule. There is no
+// third list mode, only a second query keyed on `value` alone.
 
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
@@ -23,8 +23,8 @@ export function SupplierPicker({
 }) {
   const suppliers = useQuery(api.suppliers.list, {}) ?? [];
   const selectedFromList = suppliers.find((s) => s._id === value);
-  // Only fired when the selection isn't already in the active list — the
-  // common case (an active supplier, or none picked) never pays for it.
+  // This query fires only when the selection is absent from the active list.
+  // The common case pays nothing, and covers an active supplier and no pick.
   const selectedById = useQuery(
     api.suppliers.get,
     value !== null && !selectedFromList ? { id: value } : "skip",
@@ -39,8 +39,8 @@ export function SupplierPicker({
 
   if (value !== null) {
     if (!selected) {
-      // Between picking a value and `suppliers.get` resolving it — brief,
-      // since the query above is already in flight.
+      // This gap sits between a pick and `suppliers.get` resolving it. It is
+      // brief, because the query above is already in flight.
       return <div className="card px-3 py-2.5 text-sub">Loading…</div>;
     }
     return (
@@ -95,9 +95,9 @@ export function SupplierPicker({
               {s.name}
             </button>
           ))}
-          {/* Matches only ever come from the active list, so an archived
-              supplier's exact name never suppresses this — typing it offers
-              a fresh row rather than resurrecting the old one. */}
+          {/* A match only ever comes from the active list, so an archived
+              supplier's exact name never suppresses this row. Somebody who
+              types it gets a fresh row, and not the old supplier back. */}
           {!matches.some(
             (s) => s.name.toLowerCase() === query.trim().toLowerCase(),
           ) && (

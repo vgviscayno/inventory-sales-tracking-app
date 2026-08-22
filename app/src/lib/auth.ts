@@ -1,3 +1,10 @@
+/**
+ * The shop's single shared passcode, held as a session cookie. There are no
+ * user accounts, so the cookie only proves that somebody knew the passcode.
+ * The token is a hash of the passcode. The server therefore recomputes the
+ * expected token from `APP_PASSCODE` and keeps no session table.
+ * The cookie lasts ten years, so the till tablet stays logged in between shifts.
+ */
 export const SESSION_COOKIE = "store_session";
 const TEN_YEARS_SECONDS = 60 * 60 * 24 * 365 * 10;
 

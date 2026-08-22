@@ -8,8 +8,8 @@ import { useState } from "react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
-// Derived from the query rather than restated — see the identical note on
-// `CustomerProfile.tsx`'s `Customer` type.
+// This type comes from the query, and does not restate it. See the identical
+// note on the `Customer` type in `CustomerProfile.tsx`.
 type Supplier = NonNullable<FunctionReturnType<typeof api.suppliers.get>>;
 
 export function SupplierProfile({
@@ -42,11 +42,12 @@ function SupplierPage({ supplier }: { supplier: Supplier }) {
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // Delete is one-way, so it gets a two-tap confirm, same as customers' and
-  // products' — even though the button is already disabled until archived.
+  // Delete is one way, so it takes a two-tap confirm, the same as a customer's
+  // and a product's. The button stays disabled until somebody archives the
+  // supplier.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isArchived = supplier.archivedAt != null;
-  // A supplier carries no balance or other second condition — archive-first
+  // A supplier carries no balance and no second condition. The archived state
   // is the whole gate, unlike a customer's.
   const deleteBlockedReason = isArchived ? null : "Archive first to delete";
 
@@ -64,7 +65,7 @@ function SupplierPage({ supplier }: { supplier: Supplier }) {
     setSaving(false);
   }
 
-  // Never gated — same reasoning as `customers.archive`.
+  // Nothing gates Archive. The reasoning is the same as in `customers.archive`.
   async function handleArchive() {
     setArchiving(true);
     await archiveSupplier({ id: supplierId });
@@ -77,7 +78,8 @@ function SupplierPage({ supplier }: { supplier: Supplier }) {
     setArchiving(false);
   }
 
-  // For good — no undo after this, so navigating away is part of the action.
+  // Delete is for good. There is no undo, so the navigation away is part of
+  // the action.
   async function handleDelete() {
     if (!confirmingDelete) {
       setConfirmingDelete(true);

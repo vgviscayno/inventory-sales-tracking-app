@@ -1,18 +1,20 @@
 "use client";
 
 /**
- * The checkboxes that pick a product's Reading ladder, shared by the
- * add-product form and the product detail page so the two never drift into
- * offering different boxes or describing them differently.
+ * The checkboxes that pick a product's Reading ladder. The add-product form and
+ * the product detail page share this component. The two therefore never drift
+ * into offering different boxes, or into describing them differently.
  *
- * Deliberately just the boxes and the note beneath them: the detail page wraps
- * this in its `DiffField` (was/reset chrome), and the add-product form in a
- * plain label, so the wrapper stays each form's business.
+ * This component is deliberately only the boxes and the note beneath them. The
+ * detail page wraps it in its `DiffField`, which carries the was-and-reset
+ * chrome. The add-product form wraps it in a plain label. The wrapper therefore
+ * stays each form's business.
  *
- * Ticks are addressed by `key`, not by label. The detail page's Units are
- * saved and so their labels are settled, but a label being typed into the add
- * form can be blank or briefly duplicated, and a tick must not follow the
- * wrong row when that happens.
+ * A tick addresses its row by `key` and not by label. The detail page holds
+ * saved Units, so their labels are settled. A label somebody types into the add
+ * form
+ * can be blank or briefly duplicated. A tick must not follow the wrong row when
+ * that happens.
  */
 export type ReadingLadderItem = {
   key: string;
@@ -30,8 +32,8 @@ export function ReadingLadderField({
   items: ReadingLadderItem[];
   baseUnitLabel: string;
   preview: string;
-  // A new product holds nothing, so its preview reads a made-up figure rather
-  // than the shelf. Says so, instead of quoting an amount nobody has.
+  // A new product holds nothing, so its preview reads a made-up figure and not
+  // the shelf. The note says so, and does not quote an amount nobody has.
   previewIsExample: boolean;
   onToggle: (key: string, checked: boolean) => void;
 }) {
@@ -53,9 +55,9 @@ export function ReadingLadderField({
         ))}
       </div>
       <p className="text-sub mt-1.5 text-[12px]">
-        {/* The Base unit is never a checkbox: it is on every ladder whether or
-            not it was chosen, because it is the only Denomination fine enough
-            to hold what the coarser ones leave behind. */}
+        {/* The Base unit is never a checkbox. It is on every ladder whether or
+            not somebody chose it, because it is the only Denomination fine
+            enough to hold what the coarser ones leave behind. */}
         Always ends in {baseUnitLabel}. Reads
         {previewIsExample ? " e.g. " : " "}"{preview}".
       </p>

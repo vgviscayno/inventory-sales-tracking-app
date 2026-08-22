@@ -8,8 +8,8 @@ import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
-// Derived from the query rather than restated — see the identical note on
-// `ProductDetail.tsx`'s `Product` type.
+// This type comes from the query, and does not restate it. See the identical
+// note on the `Product` type in `ProductDetail.tsx`.
 type Customer = NonNullable<FunctionReturnType<typeof api.customers.get>>;
 
 export function CustomerProfile({
@@ -45,13 +45,14 @@ function CustomerPage({ customer }: { customer: Customer }) {
   const [savingDetails, setSavingDetails] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // Delete is one-way, so it gets a two-tap confirm, same as products' —
-  // even though the button is already disabled until the balance is zero.
+  // Delete is one way, so it takes a two-tap confirm, the same as a product's.
+  // The button is already disabled until the balance is zero.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isArchived = customer.archivedAt != null;
-  // Mirrors the server's gate (see `customers.remove`) so what the button
-  // shows and what it's actually allowed to do never disagree. Gated in
-  // either direction — an overpayment blocks deletion exactly like a debt.
+  // This check mirrors the server's gate, so what the button shows and what it
+  // may do never disagree. See `customers.remove`. The gate holds in either
+  // direction. An overpayment blocks the delete exactly as an Utang balance
+  // does.
   const deleteBlockedReason =
     customer.balance === 0
       ? null
@@ -78,9 +79,9 @@ function CustomerPage({ customer }: { customer: Customer }) {
     setSavingDetails(false);
   }
 
-  // Never gated — a customer with a debt archives on one tap, the same tap
-  // as any other customer. The balance keeps rendering on her row and in the
-  // Archived section header, so nothing about it needs a warning first.
+  // Nothing gates Archive. A customer who owes money archives on one tap, the
+  // same tap as any other customer. The balance still renders on the row and in
+  // the Archived section header, so it needs no warning first.
   async function handleArchive() {
     setArchiving(true);
     await archiveCustomer({ id: customerId });
@@ -93,7 +94,8 @@ function CustomerPage({ customer }: { customer: Customer }) {
     setArchiving(false);
   }
 
-  // For good — no undo after this, so navigating away is part of the action.
+  // Delete is for good. There is no undo, so the navigation away is part of
+  // the action.
   async function handleDelete() {
     if (!confirmingDelete) {
       setConfirmingDelete(true);

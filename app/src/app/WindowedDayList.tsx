@@ -1,11 +1,12 @@
 "use client";
 
-// A windowed, day-grouped list. Headings and rows have different fixed
-// heights, so positions come from a prefix-sum offset table rather than a
-// single row height. The current day's heading pins as an overlay —
-// reserving no space, and only once its own inline heading has scrolled away,
-// so it never reads double. This is what keeps a year of entries scrollable
-// without a year of DOM nodes.
+// A windowed, day-grouped list. A heading and a row have different fixed
+// heights, so a prefix-sum offset table gives every position. A single row
+// height does not.
+// The current day's heading pins as an overlay, and reserves no space. It pins
+// only once its own inline heading has scrolled away, so the heading never
+// reads double.
+// This is what keeps a year of entries scrollable without a year of DOM nodes.
 
 import { type ReactNode, useMemo, useState } from "react";
 import { dayKey, formatDayHeading, signed } from "./format";

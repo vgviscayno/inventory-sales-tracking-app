@@ -14,9 +14,9 @@ import { ReadingLadderField } from "./ReadingLadderField";
 
 export default function ProductsPage() {
   const [search, setSearch] = useState("");
-  // One query covering both sections — `include: "withArchived"` — split
-  // client-side into active and archived, rather than a second `list` call
-  // for the collapsed section that would re-run the same server-side scan.
+  // One query covers both sections, with `include: "withArchived"`. The split
+  // into active and archived runs on the client. A second `list` call for the
+  // collapsed section would re-run the same server-side scan.
   const allProducts =
     useQuery(api.products.list, {
       search: search || undefined,
@@ -30,24 +30,25 @@ export default function ProductsPage() {
   const [name, setName] = useState("");
   const [baseUnitLabel, setBaseUnitLabel] = useState("");
   const [baseUnitPrice, setBaseUnitPrice] = useState("");
-  // Extra Units beyond the Base one — eggs' "tray" alongside its "piece".
-  // Empty by default: a product needs only its Base unit to be sellable, and
-  // nothing here is seeded with a plausible-looking label (see
-  // docs/adr/0004-base-unit-locked.md).
+  // Extra Units beyond the Base one, such as an egg's "tray" alongside its
+  // "piece". The list is empty by default, because a product needs only its
+  // Base unit to be sellable. Nothing here seeds a plausible label. See
+  // docs/adr/0004-base-unit-locked.md.
   const [extraUnits, setExtraUnits] = useState<
     { key: string; label: string; baseEquivalent: string; price: string }[]
   >([]);
-  // Which label to nominate as Default, chosen from whichever labels are
-  // currently non-empty — validated against that set at submit time rather
-  // than kept in sync as she types, so a mid-edit rename can't leave a
-  // dangling selection. Empty means unset (falls back to the Base unit).
+  // Which label to nominate as Default. The choice comes from whichever labels
+  // are non-empty right now. The form validates it against that set at submit
+  // time, and does not keep it in step with every keystroke. A mid-edit rename
+  // therefore cannot leave a dangling selection.
+  // An empty value means unset, which falls back to the Base unit.
   const [defaultUnitLabel, setDefaultUnitLabel] = useState("");
-  // The Reading ladder, held as the keys of the rows ticked rather than their
-  // labels. A label being typed is blank for a keystroke and can briefly
-  // duplicate another, so keys are the only stable handle here; they become
-  // labels once, at submit. Renaming or reordering a row therefore keeps its
-  // tick, and clearing a row's Base equivalent only hides the box until the
-  // value is back.
+  // The Reading ladder, held as the keys of the ticked rows and not their
+  // labels. A label somebody is typing is blank for a keystroke, and it can
+  // briefly duplicate another. A key is therefore the only stable handle here,
+  // and the form turns keys into labels once, at submit.
+  // A rename or a reorder of a row keeps its tick. A cleared Base equivalent
+  // only hides the box until the value is back.
   const [ladderKeys, setLadderKeys] = useState<string[]>([]);
   const [lowStockThreshold, setLowStockThreshold] = useState("");
   const [adding, setAdding] = useState(false);
@@ -75,11 +76,11 @@ export default function ProductsPage() {
     ).size ===
       extraUnits.length + 1;
 
-  // The boxes to offer, asked of the reading itself so the form can never
-  // offer a Denomination `buildReadingLadder` would drop. Each row is carried
-  // through with its key, which is what a tick is held by. Only extra Units
-  // can qualify: the Base unit is on every ladder already, and a row is a
-  // candidate only once its Base equivalent parses.
+  // The boxes to offer. The form asks the reading itself, so it can never offer
+  // a Denomination `buildReadingLadder` would drop. Each row carries its key
+  // through, because a tick is held by key.
+  // Only an extra Unit qualifies. The Base unit is on every ladder already, and
+  // a row is a candidate only once its Base equivalent parses.
   const denominations = selectableDenominations({
     units: extraUnits.map((u) => ({
       key: u.key,
@@ -161,8 +162,9 @@ export default function ProductsPage() {
       lowStockThreshold: lowStockThreshold
         ? Number(lowStockThreshold)
         : undefined,
-      // Keys become labels here, and only here. Nothing ticked sends nothing
-      // at all: an absent ladder already means the plain Base-unit reading.
+      // Keys become labels here, and only here. Nothing ticked sends nothing at
+      // all, because an absent ladder already means the plain Base-unit
+      // reading.
       denominationLabels: ladderLabels.length > 0 ? ladderLabels : undefined,
     });
     setName("");
@@ -362,10 +364,11 @@ export default function ProductsPage() {
             </div>
           )}
 
-          {/* Appears the moment a Unit coarser than the Base one exists, the
-              same rule the detail page uses and the same pop-in the Default
-              unit select above already does. A single-Unit product never sees
-              it: its stock reads the plain way either way. */}
+          {/* This field appears the moment a Unit coarser than the Base one
+              exists. The detail page uses the same rule, and the Default unit
+              select above already pops in the same way. A single-Unit product
+              never sees it, because its stock reads the plain way either
+              way. */}
           {denominations.length > 0 && (
             <div>
               <span className="text-sub block text-[13px] mb-1">

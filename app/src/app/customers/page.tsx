@@ -7,8 +7,8 @@ import { api } from "../../../convex/_generated/api";
 import { ArchivedSection } from "../ArchivedSection";
 
 export default function CustomersPage() {
-  // One query covering both sections, split client-side — see the identical
-  // note on the Products list.
+  // One query covers both sections, and the split runs on the client. See the
+  // identical note on the Products list.
   const allCustomers =
     useQuery(api.customers.list, { include: "withArchived" }) ?? [];
   const customers = allCustomers.filter((c) => c.archivedAt == null);

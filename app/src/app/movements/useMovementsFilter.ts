@@ -32,18 +32,20 @@ function readStored(): Stored | null {
 const DEFAULT: Stored = { typeFilter: "all", includeSales: false };
 
 /**
- * The Movements tab's filter selection, kept in localStorage rather than the
- * URL: the nav's links to `/movements` carry no query string, so a URL-only
- * filter would reset on every trip through the nav bar rather than surviving
- * it. Read lazily on mount (not in the initializer) so server-rendered and
- * first-client-render markup match before localStorage is consulted.
+ * The Movements tab's filter selection, held in localStorage and not in the
+ * URL. The nav's links to `/movements` carry no query string. A URL-only
+ * filter would therefore reset on every trip through the nav bar, instead of
+ * surviving it.
+ * The mount effect reads storage, and the initializer does not. The
+ * server-rendered markup and the first client render therefore match before
+ * anything consults localStorage.
  *
- * Storage is written only from the setters below, at the moment the user
- * changes something — never from an effect watching the state. A blanket
- * `useEffect(() => write(state), [state])` would also fire right after the
- * mount effect hydrates from storage, and it closes over the pre-hydration
- * (default) state, so it would clobber whatever this same mount just read
- * back to the defaults.
+ * Only the setters below write to storage, at the moment somebody changes
+ * something. No effect watches the state and writes it.
+ * A blanket `useEffect(() => write(state), [state])` would also fire right
+ * after the mount effect hydrates from storage. It closes over the state from
+ * before that hydration, which is the default. It would therefore clobber
+ * whatever the same mount just read, and put the defaults back.
  */
 export function useMovementsFilter() {
   const [state, setState] = useState<Stored>(DEFAULT);
