@@ -16,10 +16,11 @@ import type * as oversold from "../oversold.js";
 import type * as payments from "../payments.js";
 import type * as products from "../products.js";
 import type * as pullouts from "../pullouts.js";
+import type * as remainderReading from "../remainderReading.js";
 import type * as sales from "../sales.js";
-import type * as settings from "../settings.js";
 import type * as stockMovements from "../stockMovements.js";
 import type * as suppliers from "../suppliers.js";
+import type * as unitLabels from "../unitLabels.js";
 
 import type {
   ApiFromModules,
@@ -36,10 +37,11 @@ declare const fullApi: ApiFromModules<{
   payments: typeof payments;
   products: typeof products;
   pullouts: typeof pullouts;
+  remainderReading: typeof remainderReading;
   sales: typeof sales;
-  settings: typeof settings;
   stockMovements: typeof stockMovements;
   suppliers: typeof suppliers;
+  unitLabels: typeof unitLabels;
 }>;
 
 /**

@@ -5,6 +5,9 @@ import { filterLifecycle } from "./lifecycle";
 import { formatStock } from "./remainderReading";
 import { unitValidator } from "./schema";
 
+// The shop-wide low-stock threshold when `appSettings` holds no row. The
+// table holds one row, and no function here writes it. The Convex dashboard
+// is the only way to set another number.
 const DEFAULT_THRESHOLD = 10;
 
 /**
