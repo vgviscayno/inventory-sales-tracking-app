@@ -21,3 +21,7 @@ Default vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-human, 
 ### Domain docs
 
 Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Comments
+
+Non-derivability earns the lines; ASD-STE100 writing rules set the register; `CONTEXT.md` sets the vocabulary. See `docs/agents/comments.md`.
