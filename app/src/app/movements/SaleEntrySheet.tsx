@@ -10,6 +10,7 @@ import { useQuery } from "convex/react";
 import { useEffect } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { unitLabelFor } from "../../../convex/unitLabels";
 import { signed } from "../format";
 
 export function SaleEntrySheet({
@@ -75,7 +76,8 @@ export function SaleEntrySheet({
                   )}
                 </div>
                 <div className="text-danger shrink-0 font-bold">
-                  {signed(l.unitQuantity)} {l.unitLabel}
+                  {signed(l.unitQuantity)}{" "}
+                  {unitLabelFor(l.unitQuantity, l.unitLabel)}
                 </div>
               </div>
             );

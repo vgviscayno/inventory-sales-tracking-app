@@ -5,7 +5,7 @@
 ### Domain vocabulary
 
 **Unit**:
-A way a product can be counted and transacted — `piece`, `tray`, `sack`. Every product has at least one, and may have several: eggs are handled both as pieces and as trays.
+A way a product can be counted and transacted — `piece`, `tray`, `sack`. Every product has at least one, and may have several: eggs are handled both as pieces and as trays. A Unit's label is its singular form, and is not necessarily what reaches the screen: wherever a label stands next to a count it is inflected to agree with it, so a label recorded as `tray` reads "1 tray" and "3 trays". Labels that take no English plural are exempt and stand unchanged at every count — measures written as abbreviations, and Tagalog nouns, which do not inflect for number at all, so `2 kg` and `3 sako`.
 _Avoid_: measure, UOM, packaging
 
 **Base unit**:
