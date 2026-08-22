@@ -36,6 +36,54 @@ _Avoid_: rung (the ladder's own jargon, which nobody in the shop would say), tie
 The amount recorded against a movement, expressed in the Unit the person actually chose — "2 trays" is a Unit quantity of 2 against the Unit `tray`. What the stock ledger reasons about is the Base-unit amount this comes to; the Unit and Unit quantity are kept so the movement can be read back the way it was entered.
 _Avoid_: quantity (ambiguous — say whether it is in Base units or in a chosen Unit)
 
+**Ledger**:
+The `stockMovements` rows that account for a product's count — every Movement that ever moved it, read newest first, each carrying the running balance immediately after it. The count held on the product itself is a cache of the ledger's sum; where the two disagree the ledger is the authority, and the balance is folded from the rows rather than walked backwards from the cache so a drifted cache cannot silently confirm itself. Names the stock record only. A customer's money record is an Account history.
+_Avoid_: history, audit log, journal, transaction log; "the ledger" unqualified for a customer's utang record
+
+**Movement**:
+One ledger row: one product, one Unit, one Unit quantity, one direction. Its signed Base amount is derived on every read from the Unit quantity and the Base equivalent snapshotted when it was written; the direction comes from the movement's type, never from a sign a caller supplied. The Unit and Unit quantity are what let it read back the way it was entered; the Base amount is what the ledger reasons about. Every Movement belongs to an Entry — there is no free-standing row.
+_Avoid_: transaction (collides with the database sense), stock change, adjustment, delta (that is the signed number a Movement carries, not the Movement)
+
+**Entry**:
+One logged event — a Delivery, a Pull-out, or a Sale — together with the Movements filed under it. It is what someone saves in a single gesture and what they reopen to edit or delete: the header holds what belongs to the whole event (when it happened, the supplier, the customer and payment method, the pull-out's reason), and each Movement under it holds one product. A Movement seen from its Entry is called a Line — the same row, not a second thing — so an Entry's Lines and its Movements are the same set counted from different ends.
+_Avoid_: batch, group, document (Convex's word for any row), transaction; "line item" as a distinct concept from Movement
+
+**Delivery**:
+An Entry that brings stock in — every Movement under it adds to its product's count. Its supplier is optional, because stock bought retail or received as a gift is still worth recording with nobody named. A Line may also create the product it names, so a product first seen on an arriving shipment does not have to be added separately beforehand.
+_Avoid_: purchase (names money changing hands, which a delivery does not record), restock (a delivery of a product never carried before is not a re-stock), receiving, stock-in, goods receipt
+
+**Pull-out**:
+An Entry that takes stock out for any reason other than a Sale — damaged, expired, personal use, given away, or other, which must carry a note. Every Movement under it subtracts. The reason is the point of the Entry: without one, stock leaving the shelf would be indistinguishable from a Sale nobody rang up. The term is the shop's own, and covers cases accounting words do not.
+_Avoid_: write-off (accounting's word, and wrong for personal use and given away), shrinkage (means unexplained loss — a pull-out is always explained), wastage, removal, stock-out (reads as "out of stock")
+
+**Sale**:
+An Entry that takes stock out in exchange for money — every Movement under it subtracts and carries the price of the Unit it was rung up in at the moment it was rung up, so what the sale charged stays derivable from its own rows rather than stored beside them. A sale is paid in cash or on Utang; an Utang sale must name a customer, a cash sale need not.
+_Avoid_: order (nothing is placed and later fulfilled — a sale is recorded once it has already happened), invoice, checkout, transaction, purchase (that is the shop buying, i.e. a Delivery)
+
+**Utang**:
+A Sale taken on credit and settled later — one of the two payment methods a Sale carries, and the word used at the counter. It stays untranslated because every English near-synonym asserts something the shop does not mean: there is no limit, no interest, no term, and no instrument. An Utang sale must name its customer, since otherwise there is nobody for the debt to attach to. Its effect lands on that customer's Account history; stock leaves the Ledger exactly as it does on a cash sale.
+_Avoid_: credit (implies an extended facility with a limit), debt, receivable, IOU, tab, "on account"
+
+**Payment**:
+Money a customer hands over against what they owe, recorded on its own with an amount and a date and never attached to a particular Sale. Payments are netted against the total of that customer's Utang sales to give their balance, so no individual Sale is ever paid off, marked settled, or closed.
+_Avoid_: settlement (that is the balance reaching zero, not the act of paying), repayment, remittance, transaction; "paying off a sale" — a payment is against the balance, never against a Sale
+
+**Account history**:
+The Utang sales and Payments a customer's balance is computed from — the money-side counterpart to the Ledger, kept apart from it because the two share no rows and answer different questions. The balance is derived on read, never stored: charges less payments. It is meaningful in both directions — positive is money owed to the shop, negative is an overpayment the shop owes back — and a customer counts as settled only at exactly zero.
+_Avoid_: ledger unqualified (that is the stock record), statement, account (ambiguous with a login), running balance (that is a stock ledger row's figure; a customer's balance has no per-row equivalent)
+
+**Negative projection**:
+A product that a pending save would leave below zero, judged on the Entry's whole net effect per product rather than line by line — so two Lines naming one product, or a raised Line beside a dropped one, cannot cancel out unseen. It is always a warning and never a refusal: the count on screen can simply be wrong, and blocking the save would leave the Ledger further from the shelf than letting it through. Saving past one is a single deliberate gesture per Entry, recorded so that a surface which skipped the warning still cannot drive stock negative with nobody looking.
+_Avoid_: negative stock (names the resulting state, not the check), insufficient stock (implies a refusal), stock-out; oversold, where the cause is not a Sale
+
+**Oversold**:
+A Negative projection caused by a Sale — more of a product rung up than the count says is on the shelf. The narrower of the two terms: a Pull-out, or an edit to a Delivery, can produce a Negative projection with nothing having been sold at all. The code currently uses `oversold` for the general case (`convex/oversold.ts` and the `oversold` locals in `DeliverySheet` and `PulloutSheet`); by this glossary those name Negative projections and are due a rename.
+_Avoid_: Negative projection where a Sale is specifically meant (Oversold is the more precise term), overdrawn, short
+
+**Archive**:
+Hiding a product, customer, or supplier from every place it can be picked, while leaving untouched everything it has already been named on. It is one of two lifecycle states — both soft, each a timestamp whose absence means active — and it is the reversible one, so it is never gated: the customer she most wants off the main list is often the one who owes money. Delete is the other, one-way, and gated both on being archived first and on whatever the entity may not be deleted while still holding — stock on hand for a product, a nonzero balance for a customer. Neither state touches a Ledger or an Account history; archiving changes visibility, never arithmetic.
+_Avoid_: deactivate, disable, hide, soft-delete (Delete is soft too, so the word does not separate the two states), remove (the mutation is spelled `remove`, but the concept is Delete)
+
 ### Process vocabulary
 
 Git-workflow terms, not domain terms — kept here because `docs/agents/domain.md` names `CONTEXT.md` as the one glossary this repo has. See `docs/git-workflow.md` for the full workflow these terms describe.
