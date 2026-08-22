@@ -595,3 +595,85 @@ test("a Unit's price and Base equivalent can be corrected in the same update as 
     defaultUnit: { label: "tray", price: 250 },
   });
 });
+
+test("the Reading ladder round-trips, and an unticked box clears it", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 0, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    readingUnitLabels: ["tray"],
+  });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    readingUnitLabels: ["tray"],
+  });
+
+  // An empty array is the clear — it already means "read plainly", so the
+  // ladder needs no separate null the way the threshold and Default unit do.
+  await t.mutation(api.products.update, { id: eggs, readingUnitLabels: [] });
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    readingUnitLabels: [],
+  });
+});
+
+test("a ladder set on a product reaches the delete gate's message", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 305, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.products.update, {
+    id: eggs,
+    readingUnitLabels: ["tray"],
+  });
+  await t.mutation(api.products.archive, { id: eggs });
+
+  // The gate speaks the same denomination every other surface does, rather
+  // than the raw Base-unit figure — 305 pieces.
+  await expect(t.mutation(api.products.remove, { id: eggs })).rejects.toThrow(
+    "10 trays, 5 pieces still on hand",
+  );
+});
+
+test("a ladder naming a Unit that has since been removed degrades to the plain reading", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 305, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.products.update, {
+    id: eggs,
+    readingUnitLabels: ["tray"],
+  });
+  // The tray goes; the stored ladder still names it. Reading it must not be
+  // what breaks the screen — see `buildReadingLadder`.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [{ label: "piece", baseEquivalent: 1, price: 8 }],
+  });
+  await t.mutation(api.products.archive, { id: eggs });
+
+  await expect(t.mutation(api.products.remove, { id: eggs })).rejects.toThrow(
+    "305 pieces still on hand",
+  );
+});
+
+test("a product can be created with a Reading ladder already set", async () => {
+  const t = setupTest();
+  const id = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    readingUnitLabels: ["tray"],
+  });
+
+  expect(await t.query(api.products.get, { id })).toMatchObject({
+    readingUnitLabels: ["tray"],
+  });
+});

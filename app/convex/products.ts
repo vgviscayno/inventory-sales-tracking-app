@@ -96,9 +96,11 @@ function validateDefaultUnit(
 
 /**
  * The Default Unit *object* a product resolves to — `resolveDefaultUnitLabel`
- * only gives the label. Shared by `withStatus` (every reader) and `remove`
- * (the delete-gate message), so "unset falls back to the Base unit" stays
- * decided in exactly one place regardless of which one needs the object.
+ * only gives the label. `withStatus` attaches it to every product a reader
+ * gets, so the price a listing quotes and the Unit a movement preselects both
+ * come off one resolution of "unset falls back to the Base unit". It has no
+ * say in how stock *reads* — that is the Reading ladder's job now
+ * (remainderReading.ts).
  */
 function resolveDefaultUnit<
   T extends {
@@ -202,7 +204,10 @@ export const create = mutation({
     baseUnitLabel: v.string(),
     defaultUnitLabel: v.optional(v.string()),
     lowStockThreshold: v.optional(v.number()),
-    remainderReadingEnabled: v.optional(v.boolean()),
+    // The Reading ladder, same posture as in `update`: labels are stored as
+    // given and resolved on every read, so nothing here has to be kept in
+    // step with a later Unit rename or removal.
+    readingUnitLabels: v.optional(v.array(v.string())),
   },
   // Always born at zero. Delivery logging is the only way to raise a count,
   // so there is no starting number to take from a caller — and none that the
@@ -245,10 +250,14 @@ export const update = mutation({
     // omitted leaves the existing value untouched (Convex drops `undefined`
     // args before the mutation runs, so `undefined` can't signal "clear").
     lowStockThreshold: v.optional(v.union(v.number(), v.null())),
-    // A plain boolean, not the null-clears/omitted-leaves-untouched pattern
-    // above — there's no third "unset" state to fall back to, so omitted is
-    // the only way to leave it untouched and an explicit value always wins.
-    remainderReadingEnabled: v.optional(v.boolean()),
+    // The Reading ladder. An empty array is the clear — it already means
+    // "read plainly", so unlike the two fields above this needs no null; an
+    // explicit value always wins, and omitted leaves it untouched. Labels are
+    // stored as given: which ones actually count, and in what order, is
+    // decided on every read by `buildReadingLadder` rather than at write time,
+    // so a Unit renamed or deleted later degrades the reading instead of
+    // leaving a wrong one stored.
+    readingUnitLabels: v.optional(v.array(v.string())),
   },
   handler: async (
     ctx,
@@ -259,7 +268,7 @@ export const update = mutation({
       baseUnitLabel,
       defaultUnitLabel,
       lowStockThreshold,
-      remainderReadingEnabled,
+      readingUnitLabels,
     },
   ) => {
     const patch: {
@@ -268,14 +277,14 @@ export const update = mutation({
       baseUnitLabel?: string;
       defaultUnitLabel?: string;
       lowStockThreshold?: number;
-      remainderReadingEnabled?: boolean;
+      readingUnitLabels?: string[];
     } = {};
     if (name !== undefined) patch.name = name;
     if (lowStockThreshold !== undefined) {
       patch.lowStockThreshold = lowStockThreshold ?? undefined;
     }
-    if (remainderReadingEnabled !== undefined) {
-      patch.remainderReadingEnabled = remainderReadingEnabled;
+    if (readingUnitLabels !== undefined) {
+      patch.readingUnitLabels = readingUnitLabels;
     }
 
     const touchesUnits = units !== undefined || baseUnitLabel !== undefined;
@@ -360,10 +369,7 @@ export const remove = mutation({
       throw new Error("Only an archived product can be deleted");
     }
     if (product.quantityOnHand !== 0) {
-      const formattedQuantity = formatStock({
-        ...product,
-        defaultUnit: resolveDefaultUnit(product),
-      });
+      const formattedQuantity = formatStock(product);
       throw new Error(
         `${formattedQuantity} still on hand — pull them out first`,
       );

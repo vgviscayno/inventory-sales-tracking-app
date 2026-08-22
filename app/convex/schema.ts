@@ -29,12 +29,16 @@ export default defineSchema({
     defaultUnitLabel: v.optional(v.string()),
     quantityOnHand: v.number(),
     lowStockThreshold: v.optional(v.number()),
-    // Per-product opt-in: every stock figure for this product reads as a
-    // whole count of the Default unit plus what's left over in Base units
-    // ("10 trays, 5 pcs") instead of a plain Base-unit number. See
-    // CONTEXT.md's "Remainder reading" and remainderReading.ts — this only
-    // changes how a quantity is read, never how it's held. Absent means off.
-    remainderReadingEnabled: v.optional(v.boolean()),
+    // The Reading ladder: which of this product's Units its stock is spelled
+    // out in ("3 cases, 5 pcs" instead of "1085 pcs"). Held as labels rather
+    // than as an ordered list of Units, because order isn't trusted — the
+    // reading sorts by descending Base equivalent and always appends the Base
+    // unit itself, so neither is stored. Absent or empty means the plain
+    // Base-unit reading. Bounded by the product's own Unit count, so it is not
+    // one of the unbounded arrays the Convex guidelines warn against. See
+    // CONTEXT.md's "Reading ladder" and remainderReading.ts — this only
+    // changes how a quantity is read, never how it's held.
+    readingUnitLabels: v.optional(v.array(v.string())),
     // Uniform two-state lifecycle, absent meaning active. Only `archivedAt`
     // is exercised in this ticket — `deletedAt` lands with it as one schema
     // edit so soft-delete (the next ticket) doesn't need a second migration.

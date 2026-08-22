@@ -7,7 +7,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { formatStock } from "../../../../convex/remainderReading";
+import {
+  formatStock,
+  selectableRungs,
+} from "../../../../convex/remainderReading";
 import { formatTime, signed } from "../../format";
 import { DeliverySheet } from "../../movements/DeliverySheet";
 import { PulloutSheet } from "../../movements/PulloutSheet";
@@ -78,13 +81,7 @@ function ProductForm({ product }: { product: Product }) {
     product.units.length > 1 ? product.defaultUnit.label : null;
   const savedThreshold =
     product.lowStockThreshold != null ? String(product.lowStockThreshold) : "";
-  const savedRemainderReadingEnabled = product.remainderReadingEnabled ?? false;
-  // Same condition `readQuantity`'s own degenerate case checks: a Default
-  // unit no coarser than the Base unit has nothing to decompose into, so the
-  // toggle would change nothing — hidden for the same reason a single-Unit
-  // product's is.
-  const remainderReadingApplicable =
-    product.units.length > 1 && product.defaultUnit.baseEquivalent > 1;
+  const savedReadingUnitLabels = product.readingUnitLabels ?? [];
 
   const [name, setName] = useState(savedName);
   const [units, setUnits] = useState<UnitDraft[]>(savedUnits);
@@ -93,8 +90,11 @@ function ProductForm({ product }: { product: Product }) {
     savedDefault,
   );
   const [lowStockThreshold, setLowStockThreshold] = useState(savedThreshold);
-  const [remainderReadingEnabled, setRemainderReadingEnabled] = useState(
-    savedRemainderReadingEnabled,
+  // The Reading ladder, held as the set of ticked labels. Order isn't kept
+  // because it isn't read: `buildReadingLadder` sorts by descending Base
+  // equivalent regardless of what was ticked when.
+  const [readingUnitLabels, setReadingUnitLabels] = useState<string[]>(
+    savedReadingUnitLabels,
   );
   const [saving, setSaving] = useState(false);
   // The mutation's refusals — a locked Base unit above all — are the whole
@@ -143,14 +143,15 @@ function ProductForm({ product }: { product: Product }) {
     baseUnitLabel !== savedBaseUnitLabel;
   const defaultDirty = defaultUnitLabel !== savedDefault;
   const thresholdDirty = lowStockThreshold !== savedThreshold;
-  const remainderReadingDirty =
-    remainderReadingEnabled !== savedRemainderReadingEnabled;
+  // Compared as a set: which Units are on the ladder is the whole of the
+  // choice, so re-ticking two boxes in the other order is not an edit.
+  const readingDirty = !sameLabels(readingUnitLabels, savedReadingUnitLabels);
   const dirtyCount = [
     nameDirty,
     unitsDirty,
     defaultDirty,
     thresholdDirty,
-    remainderReadingDirty,
+    readingDirty,
   ].filter(Boolean).length;
   const isDirty = dirtyCount > 0;
 
@@ -183,10 +184,41 @@ function ProductForm({ product }: { product: Product }) {
 
   const canSave = name.trim().length > 0 && unitsValid;
 
+  // The boxes to offer, asked of the reading itself rather than re-derived
+  // here — the form must never offer a rung `buildReadingLadder` would drop.
+  // Taken from the drafts rather than the saved product, so ticking a Unit
+  // added, renamed, or re-scaled in this same unsaved edit works. A product
+  // with no coarser Unit at all (a single-Unit one) is never offered the
+  // selector, since its reading is the plain one either way.
+  const rungs = selectableRungs({
+    units: parsedUnits,
+    baseUnitLabel: baseUnitTrimmed,
+  });
+  // The reading as it would come out if this edit were saved, over the stock
+  // actually on hand. A product holding nothing (or a negative count, which
+  // always reads plainly) has no figure worth previewing, so one of the
+  // coarsest rung plus one Base unit stands in.
+  const previewAmount =
+    product.quantityOnHand > 0
+      ? product.quantityOnHand
+      : (rungs[0]?.baseEquivalent ?? 0) + 1;
+  const readingPreview = formatStock({
+    units: parsedUnits,
+    baseUnitLabel: baseUnitTrimmed,
+    readingUnitLabels,
+    quantityOnHand: previewAmount,
+  });
+
   function resetUnits() {
     setUnits(savedUnits);
     setBaseUnitLabel(savedBaseUnitLabel);
     setDefaultUnitLabel(savedDefault);
+  }
+
+  function toggleRung(label: string, on: boolean) {
+    setReadingUnitLabels((labels) =>
+      on ? [...labels, label] : labels.filter((l) => l !== label),
+    );
   }
 
   // Editing a Unit's label has to drag the Base and Default markers along with
@@ -198,6 +230,11 @@ function ProductForm({ product }: { product: Product }) {
     if (field === "label") {
       if (old.label === baseUnitLabel) setBaseUnitLabel(value);
       if (old.label === defaultUnitLabel) setDefaultUnitLabel(value);
+      // The ladder names its rungs by label too, so a rename has to drag them
+      // with it — otherwise the rung would silently drop off the reading.
+      setReadingUnitLabels((labels) =>
+        labels.map((l) => (l === old.label ? value : l)),
+      );
     }
   }
 
@@ -214,6 +251,7 @@ function ProductForm({ product }: { product: Product }) {
     setUnits(units.filter((_, i) => i !== index));
     // A removed Default falls back to the Base unit (server does the same).
     if (removed.label === defaultUnitLabel) setDefaultUnitLabel(null);
+    setReadingUnitLabels((labels) => labels.filter((l) => l !== removed.label));
   }
 
   function addUnit() {
@@ -241,7 +279,7 @@ function ProductForm({ product }: { product: Product }) {
           ? { defaultUnitLabel: defaultUnitLabel?.trim() ?? null }
           : {}),
         lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
-        ...(remainderReadingDirty ? { remainderReadingEnabled } : {}),
+        ...(readingDirty ? { readingUnitLabels } : {}),
       });
       // Canonicalize the local drafts to exactly what the reactive query will
       // hand back, so every dirty mark clears instead of relying on the typed
@@ -386,27 +424,40 @@ function ProductForm({ product }: { product: Product }) {
             className={fieldInputClass(thresholdDirty)}
           />
         </DiffField>
-        {remainderReadingApplicable && (
-          <div
-            className={
-              remainderReadingDirty
-                ? "rounded-r-lg border-l-[3px] border-amber-400 bg-amber-50/60 py-1.5 pl-2.5"
-                : undefined
+        {rungs.length > 0 && (
+          <DiffField
+            label="Read stock in"
+            dirty={readingDirty}
+            was={
+              savedReadingUnitLabels.length > 0
+                ? savedReadingUnitLabels.join(", ")
+                : `${savedBaseUnitLabel} only`
             }
+            onReset={() => setReadingUnitLabels(savedReadingUnitLabels)}
           >
-            <label className="flex items-center gap-2 text-[13px]">
-              <input
-                type="checkbox"
-                checked={remainderReadingEnabled}
-                onChange={(e) => setRemainderReadingEnabled(e.target.checked)}
-              />
-              <span>
-                Read stock as whole {product.defaultUnit.label} plus leftover{" "}
-                {product.baseUnitLabel} (e.g. "10 {product.defaultUnit.label}, 5{" "}
-                {product.baseUnitLabel}")
-              </span>
-            </label>
-          </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {rungs.map((unit) => (
+                <label
+                  key={unit.label}
+                  className="flex items-center gap-1.5 text-[13px]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={readingUnitLabels.includes(unit.label)}
+                    onChange={(e) => toggleRung(unit.label, e.target.checked)}
+                  />
+                  <span>{unit.label}</span>
+                </label>
+              ))}
+            </div>
+            <p className="text-sub mt-1.5 text-[12px]">
+              {/* The Base unit is never a checkbox: it is on every ladder
+                  whether or not it was chosen, because it is the only rung
+                  fine enough to hold what the coarser ones leave behind. */}
+              Always ends in {baseUnitTrimmed}. Reads
+              {product.quantityOnHand > 0 ? " " : " e.g. "}"{readingPreview}".
+            </p>
+          </DiffField>
         )}
         {isArchived ? (
           <span className="pill archived inline-block">Archived</span>
@@ -540,6 +591,17 @@ function ProductForm({ product }: { product: Product }) {
 
 const FIELD_INPUT_BASE =
   "w-full rounded-[10px] border bg-card px-2.5 py-2.5 text-[15px]";
+
+/**
+ * Whether two ladders name the same Units. Order is deliberately not part of
+ * it — the reading sorts its own rungs (see `buildReadingLadder`), so ticking
+ * the same two boxes in the other order has changed nothing to save.
+ */
+function sameLabels(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const inB = new Set(b);
+  return a.every((label) => inB.has(label));
+}
 
 // An edited input gets an amber border + ring so the change is visible even
 // with the field scrolled past its label.
