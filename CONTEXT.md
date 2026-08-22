@@ -9,7 +9,7 @@ A way a product can be counted and transacted — `piece`, `tray`, `sack`. Every
 _Avoid_: measure, UOM, packaging
 
 **Base unit**:
-The single Unit a product's stock is counted in. Every quantity the app holds about that product's stock — how much is on hand, the threshold at which it reads as low — is expressed in it. Which Unit plays this role is a decision recorded per product, not inferred from the Units themselves.
+The single Unit a product's stock is counted in. Every quantity the app holds about that product's stock — how much is on hand, the threshold at which it reads as low — is expressed in it, and so is the shop-wide threshold, which is compared against a product's quantity on hand as it stands. Which Unit plays this role is a decision recorded per product, not inferred from the Units themselves.
 _Avoid_: piece (that is one product's Base unit, not the concept), smallest unit, primary unit
 
 **Base equivalent**:
@@ -17,7 +17,7 @@ How many Base units one of a given Unit amounts to — 1 for the Base unit itsel
 _Avoid_: conversion factor (silent about direction), multiplier, ratio
 
 **Default unit**:
-The Unit a product leads with — the one its price is quoted in on listings, and the one preselected when someone logs a movement against it. A separate decision from the Base unit, because what a product is counted in and what it usually changes hands in need not be the same. Where no choice is recorded, the Base unit stands in. It is also how the shop-wide low-stock threshold stays meaningful across a catalogue that counts different products differently: that one shared number is taken as a count of each product's Default unit, so it says "warn me under ten of however I usually sell it" rather than ten of ten different things. A threshold set on an individual product is still held in that product's Base unit.
+The Unit a product leads with — the one its price is quoted in on listings, and the one preselected when someone logs a movement against it. A separate decision from the Base unit, because what a product is counted in and what it usually changes hands in need not be the same. Where no choice is recorded, the Base unit stands in. It has no bearing on the low-stock threshold, which is counted in Base units whether it is the shop-wide one or one set on the product itself.
 _Avoid_: primary unit, main unit (both blur into Base unit)
 
 **Remainder reading**:
