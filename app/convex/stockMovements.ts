@@ -10,10 +10,9 @@ import { roundCentavos } from "./money";
 import { findOversold } from "./oversold";
 import { findUnit, resolveDefaultUnitLabel } from "./products";
 
-// The fixed reason set for a pull-out. Lives here — not in pullouts.ts — so
-// both `pullouts.create` and `stockMovements.editEntry` (which patches the
-// same field on the same rows) validate against the one set rather than two
-// that could drift apart.
+// The fixed reason set for a Pull-out. It lives here and not in pullouts.ts,
+// because `pullouts.create` and `stockMovements.editEntry` both write the same
+// field on the same rows. One set therefore cannot drift into two.
 export const reasonCategory = v.union(
   v.literal("damaged"),
   v.literal("expired"),
@@ -23,13 +22,12 @@ export const reasonCategory = v.union(
 );
 
 /**
- * The sign each movement type carries. A `stockMovements` row stores `quantity`
- * as a signed delta so every cache update is a plain add with no per-type
- * branching — but that sign is redundant with the `type` sitting beside it, and
- * a schema comment is not what stops a positive pull-out. This table is. It is
- * the only place in the codebase that knows which way a type moves stock, and
- * every row in the ledger goes through it — there is no second write path that
- * sets a count without moving it.
+ * The sign each Movement type carries. A `stockMovements` row holds a signed
+ * delta, so a cache update is a plain add with no per-type branch.
+ * The sign duplicates the `type` beside it. A schema comment does not stop a
+ * positive Pull-out. This table does.
+ * This table is the only place that knows which way a type moves stock. Every
+ * row in the Ledger goes through it. There is no second write path.
  */
 const DIRECTION = {
   delivery: 1,
@@ -38,9 +36,9 @@ const DIRECTION = {
 } as const;
 
 /**
- * The per-type fields, each fixed to the one type that may carry it — so a
- * pull-out reason on a sale, or a sale price on a delivery, is a type error
- * rather than a row nobody notices.
+ * The per-type fields. Each field belongs to the one type that may carry it.
+ * A Pull-out reason on a Sale is therefore a type error. So is a Sale price on
+ * a Delivery. Neither reaches the table as a row nobody notices.
  */
 type MovementDetails =
   | { type: "delivery"; refId: Id<"deliveries"> }
@@ -54,19 +52,20 @@ type MovementDetails =
 
 type Movement = MovementDetails & {
   productId: Id<"products">;
-  // The Unit this movement was entered in — must name one of the product's
+  // The Unit this Movement was entered in. It must name one of the product's
   // `units`. `recordMovement` resolves it to find the Base equivalent to
-  // snapshot, so no caller has to look that up itself.
+  // snapshot, so no caller has to look that up.
   unitLabel: string;
-  /** How many of that Unit moved — a magnitude, never signed. */
+  /** How many of that Unit moved. It is a magnitude and never signed. */
   unitQuantity: number;
 };
 
 /**
- * The Base amount a row's snapshot comes to — never stored, derived on every
- * read (docs/adr/0003-base-unit-storage.md). Rounded so the float noise from
- * a decimal Unit quantity (`1.7 * 1000` !== `1700`) never re-enters
- * `quantityOnHand`, which is written back rather than recomputed each time.
+ * The Base amount a row's snapshot comes to. The app never stores it and
+ * derives it on every read. See docs/adr/0003-base-unit-storage.md.
+ * The result rounds. A decimal Unit quantity carries float noise (`1.7 * 1000`
+ * is not `1700`). That noise must never reach `quantityOnHand`, which the app
+ * writes back rather than recomputes.
  */
 export function deriveBaseAmount(m: {
   unitQuantity: number;
@@ -76,9 +75,9 @@ export function deriveBaseAmount(m: {
 }
 
 /**
- * Write one movement and move the product's cached count with it. The two
- * halves are the invariant the whole feature exists to protect, so no caller
- * gets to do one without the other.
+ * Write one Movement and move the product's cached count with it.
+ * The two halves are the invariant this module exists to protect. No caller
+ * does one half without the other.
  */
 export async function recordMovement(ctx: MutationCtx, movement: Movement) {
   if (movement.unitQuantity < 0) {
@@ -108,10 +107,12 @@ export async function recordMovement(ctx: MutationCtx, movement: Movement) {
 }
 
 /**
- * What a sale charged, derived from its ledger rows rather than stored. Sale
- * quantities are negative, so the line amounts are subtracted to land back on
- * a positive total. Each line rounds to centavos before it joins the sum, so
- * a receipt's printed lines visibly add up to its printed total.
+ * What a Sale charged. The total derives from the Sale's Ledger rows. The app
+ * never stores it.
+ * A Sale's Unit quantities are negative, so each Line amount subtracts to reach
+ * a positive total.
+ * Each Line rounds to centavos before it joins the sum. The printed Lines of a
+ * receipt therefore add up to its printed total.
  */
 export async function saleTotal(ctx: QueryCtx, saleId: Id<"sales">) {
   const movements = await ctx.db
@@ -129,18 +130,18 @@ export async function saleTotal(ctx: QueryCtx, saleId: Id<"sales">) {
 }
 
 /**
- * The per-product ledger the product detail page reads: every movement that
- * ever changed this product's count, newest first, each carrying the running
- * balance immediately after it. That
- * balance is why this is computed oldest-first internally and reversed for
- * return rather than walked backwards from `quantityOnHand`: a backwards walk
- * would silently agree with a cache that had drifted from its own ledger,
- * while this one derives the balance from the rows alone, the same source
- * `expectCacheMatchesLedger` checks the cache against.
+ * The per-product Ledger the product detail page reads. It holds every Movement
+ * that ever changed this product's count, newest first. Each row carries the
+ * running balance immediately after it.
+ * This query folds oldest-first and reverses the result. It never walks
+ * backwards from `quantityOnHand`. A backwards walk agrees in silence with a
+ * cache that drifted from its own Ledger. This fold derives the balance from
+ * the rows alone. `expectCacheMatchesLedger` checks the cache against that
+ * same source.
  *
- * `netChange` names the signed quantity — matching the field the Movements
- * tab's day-grouped list already keys its headings on — so this ledger reuses
- * that same list component rather than a second copy of it.
+ * `netChange` names the signed quantity. The day-grouped list on the Movements
+ * tab keys its headings on that same field. This Ledger therefore reuses the
+ * list component, and not a second copy.
  */
 export const listForProduct = query({
   args: { productId: v.id("products") },
@@ -150,18 +151,17 @@ export const listForProduct = query({
       .withIndex("by_product", (q) => q.eq("productId", productId))
       .collect();
 
-    // `by_product` doesn't order by `createdAt`; a stable sort here is what
-    // makes the running balance (and the reversed, newest-first return)
-    // actually chronological rather than insertion-order-by-accident.
+    // `by_product` does not order by `createdAt`. A stable sort here makes the
+    // running balance chronological, and the reversed return with it.
+    // Insertion order does not.
     const oldestFirst = [...movements].sort(
       (a, b) => a.createdAt - b.createdAt,
     );
 
-    // Balances are folded synchronously, before any of the `await`s below —
-    // those run concurrently over the whole array, and a shared counter
-    // mutated inside an async callback would race against them, each row
-    // reading whatever the counter had reached by the time its own lookup
-    // resolved rather than the value at its own turn.
+    // The fold is synchronous and runs before the `await`s below. Those awaits
+    // run concurrently over the whole array. A shared counter inside an async
+    // callback races against them. Each row then reads whatever the counter
+    // holds when its own lookup resolves. It misses the value at its own turn.
     let runningBalance = 0;
     const balances = oldestFirst.map(
       (m) => (runningBalance += deriveBaseAmount(m)),
@@ -169,10 +169,10 @@ export const listForProduct = query({
 
     const rows = await Promise.all(
       oldestFirst.map(async (m, i) => {
-        // A delivery row's supplier lives on the `deliveries` header, not on
-        // the movement itself — `ctx.db.get` on both hops bypasses lifecycle
-        // filtering the same way `sales.list`'s customer join does, so an
-        // archived or deleted supplier's name still renders here.
+        // A Delivery row's supplier lives on the `deliveries` header and not
+        // on the Movement. `ctx.db.get` on both hops bypasses the lifecycle
+        // filter, the same way the customer join in `sales.list` does. An
+        // archived or deleted supplier therefore still shows its name here.
         let supplierName: string | undefined;
         if (m.type === "delivery" && m.refId !== undefined) {
           const delivery = await ctx.db.get(m.refId as Id<"deliveries">);
@@ -184,13 +184,13 @@ export const listForProduct = query({
         return {
           _id: m._id,
           type: m.type,
-          // Always set — every row belongs to an entry the ledger can open.
+          // Always set. Every row belongs to an Entry the Ledger can open.
           refId: m.refId,
           createdAt: m.createdAt,
-          // Base-denominated, signed — what the running balance is folded
-          // from. `unitLabel`/`unitQuantity` below are what the row reads
-          // back as ("2 trays"), which is not the same figure once the Unit
-          // isn't the Base unit.
+          // Signed, in Base units. The running balance folds from this figure.
+          // `unitLabel` and `unitQuantity` below are what the row reads back as
+          // ("2 trays"). They give a different figure once the Unit is not the
+          // Base unit.
           netChange: deriveBaseAmount(m),
           runningBalance: balances[i],
           unitLabel: m.unitLabel,
@@ -211,11 +211,12 @@ export const listForProduct = query({
 });
 
 /**
- * Every line a header row (delivery, pull-out, or sale) carries, each joined
- * to the product name at the time of reading and holding the `movementId`
- * that identifies it for an edit — the one shape `deliveries.list`,
- * `pullouts.list`, `sales.list`, and `editEntry`'s prefill all read lines
- * through, rather than each re-deriving it from `stockMovements` by hand.
+ * Every Line a header row carries, for a Delivery, a Pull-out, or a Sale. Each
+ * Line joins to the product name at the moment of the read. Each Line carries
+ * the `movementId` that identifies it for an edit.
+ * `deliveries.list`, `pullouts.list`, `sales.list`, and the prefill of
+ * `editEntry` all read Lines through this one shape. None of them re-derives
+ * the shape from `stockMovements`.
  */
 export async function entryLines(
   ctx: QueryCtx,
@@ -233,12 +234,12 @@ export async function entryLines(
         movementId: m._id,
         productId: m.productId,
         productName: product?.name ?? "Deleted product",
-        // Signed, in the Unit the line was actually entered in — what lets a
-        // sale read back as "2 trays" rather than "60 pieces". Never called
-        // `quantity` on its own (see CONTEXT.md's Unit-quantity glossary
-        // entry): every other fold over the ledger has to work in Base
-        // amounts, so `baseAmount` is derived here too rather than making
-        // each caller re-derive it from `unitLabel`/`unitQuantity` by hand.
+        // Signed, in the Unit the Line was entered in. This is what lets a
+        // Sale read back as "2 trays" and not as "60 pieces". Nothing calls the
+        // field `quantity` alone.
+        // Every other fold over the Ledger works in Base amounts, so this shape
+        // derives `baseAmount` too. No caller re-derives it from `unitLabel`
+        // and `unitQuantity`. See "Unit quantity" in CONTEXT.md.
         unitLabel: m.unitLabel,
         unitQuantity: m.unitQuantity,
         baseAmount: deriveBaseAmount(m),
@@ -254,12 +255,13 @@ const entryRef = v.union(
 );
 
 /**
- * One entry's lines and (for a pull-out) its reason — what the edit sheet
- * prefills from when it is opened by `refId` alone, which is all a tap on a
- * product ledger row carries. The Movements tab already holds the fuller
- * entry object from its own list query and doesn't need this, but routing
- * both openers through the same fetch keeps the sheet's prefill logic single
- * rather than branching on where the tap came from.
+ * One Entry's Lines, and the reason for a Pull-out. The edit sheet prefills
+ * from this query when it opens by `refId` alone. A tap on a product Ledger row
+ * carries nothing more.
+ * The Movements tab holds the fuller Entry object from its own list query and
+ * does not need this query. Both openers route through the same fetch, so the
+ * prefill of the sheet stays single. It does not branch on the origin of the
+ * tap.
  */
 export const getEntry = query({
   args: { entry: entryRef },
@@ -285,17 +287,17 @@ export const getEntry = query({
 });
 
 /**
- * A correction to an existing delivery or pull-out: the caller sends the
- * *full* desired line set — some carrying the `movementId` of a row they
- * still describe, some new — and this diffs it against what is actually on
- * the entry today. A line whose `movementId` survives with a changed
- * quantity is patched by the difference; one that disappears is deleted and
- * its delta reversed; a line with no `movementId` is a fresh insert. Sale
- * entries are rejected outright — they are edited from the Register, not
- * here — and the negative-stock warning is the identical one `sales.create`
- * and `pullouts.create` carry, just judged against the entry's *net* effect
- * per product rather than line by line, since one entry can touch the same
- * product on more than one line.
+ * A correction to an existing Delivery or Pull-out. The caller sends the full
+ * desired Line set. Some Lines carry the `movementId` of a row they still
+ * describe, and some Lines are new. This mutation diffs that set against what
+ * the Entry holds today.
+ * A Line whose `movementId` survives with a changed Unit quantity takes a patch
+ * by the difference. A Line that disappears takes a delete, and its delta
+ * reverses. A Line with no `movementId` is a fresh insert.
+ * This mutation refuses a Sale Entry. The Register edits a Sale.
+ * The Negative projection warning is the one `sales.create` and
+ * `pullouts.create` carry. It judges the Entry's net effect per product, and
+ * not each Line. One Entry can touch one product on more than one Line.
  */
 export const editEntry = mutation({
   args: {
@@ -304,26 +306,27 @@ export const editEntry = mutation({
       v.object({
         movementId: v.optional(v.id("stockMovements")),
         productId: v.id("products"),
-        // The Unit this line's quantity is entered in. A surviving line
-        // (carrying a `movementId`) may only repeat the Unit it already has —
-        // see the guard below — so omitted there means "unchanged"; on a
-        // fresh line it falls back to the product's Default unit, same as
-        // `deliveries.create`. Optional rather than required so a caller that
-        // doesn't yet deal in Units (pull-out editing) keeps working
-        // unmodified.
+        // The Unit this Line's quantity is entered in.
+        // A surviving Line carries a `movementId`, and may only repeat the Unit
+        // it already has. See the guard below. An omitted Unit there means
+        // "unchanged".
+        // On a fresh Line an omitted Unit falls back to the product's Default
+        // unit, the same as `deliveries.create`.
+        // The field is optional, so a caller that sends no Unit at all keeps
+        // working unmodified.
         unitLabel: v.optional(v.string()),
         quantity: v.number(),
       }),
     ),
     reasonCategory: v.optional(reasonCategory),
     reasonNotes: v.optional(v.string()),
-    // Delivery-only, mirroring `customers.update`'s notes trap: omitted
-    // leaves the delivery's supplier untouched, `null` clears it back to
-    // none, an id changes it. Ignored for a pull-out.
+    // Delivery only. It mirrors the notes trap in `customers.update`. An
+    // omitted value leaves the Delivery's supplier untouched, `null` clears it
+    // back to none, and an id changes it. A Pull-out ignores it.
     supplierId: v.optional(v.union(v.id("suppliers"), v.null())),
-    // Same backstop as create's allowNegative: the warning is computed
-    // client-side, so this flag is the record that a human saw it and said
-    // yes. One flag for the whole edit, not one per line.
+    // The same backstop as `allowNegative` on create. The client computes the
+    // warning, so this flag records that a human saw it and agreed. One flag
+    // covers the whole edit, and not one Line.
     allowNegative: v.optional(v.boolean()),
   },
   handler: async (
@@ -356,16 +359,16 @@ export const editEntry = mutation({
       .query("stockMovements")
       .withIndex("by_refId", (q) => q.eq("refId", entry.entryId))
       .collect();
-    // An entry with no rows at all isn't a mismatch the check below would
-    // catch — that check is vacuously true over an empty list — so a bogus
-    // `entryId` paired with an all-new line set would otherwise sail through
-    // and silently create movements against an id nothing else points to.
+    // An Entry with no rows is not a mismatch the check below catches. That
+    // check is vacuously true over an empty list. A bogus `entryId` with an
+    // all-new Line set would otherwise pass. It would create Movements against
+    // an id nothing else points to.
     if (existing.length === 0) {
       throw new Error(`Entry ${entry.entryId} does not exist`);
     }
-    // `by_refId` can only ever hold rows of one type for a given id, but this
-    // mutation is handed `entry.type` by the caller rather than trusting the
-    // rows — a mismatch here means the sheet opened the wrong kind of entry.
+    // `by_refId` only ever holds rows of one type for a given id. This
+    // mutation takes `entry.type` from the caller and does not trust the rows.
+    // A mismatch here means the sheet opened the wrong kind of Entry.
     if (existing.some((m) => m.type !== entry.type)) {
       throw new Error(`Entry ${entry.entryId} is not a ${entry.type}`);
     }
@@ -390,12 +393,12 @@ export const editEntry = mutation({
           "A line's product can't change — remove it and add a new line instead",
         );
       }
-      // A Unit change is not a quantity patch — the row's `unitLabel` and
-      // `baseEquivalentAtEntry` are snapshotted together (ADR-0003), so
-      // reinterpreting one without the other is the same corruption a
-      // product swap would be. The sheet still presents changing a line's
-      // Unit as an ordinary edit; it does so by dropping this line's
-      // `movementId` and sending a fresh one instead, which never reaches
+      // A Unit change is not a quantity patch. The row snapshots `unitLabel`
+      // and `baseEquivalentAtEntry` together. See
+      // docs/adr/0003-base-unit-storage.md. To reinterpret one without the
+      // other corrupts the row, the same way a product swap does.
+      // The sheet still presents a Unit change as an ordinary edit. It drops
+      // this Line's `movementId` and sends a fresh Line, which never reaches
       // this guard.
       if (
         line.unitLabel !== undefined &&
@@ -408,10 +411,10 @@ export const editEntry = mutation({
       referencedIds.add(line.movementId);
     }
 
-    // Project every line's contribution to each product's net delta before
-    // writing anything, so the negative-stock check sees the whole entry —
-    // including a product touched by two lines, or a line dropped alongside
-    // one raised — the way the diff will actually leave it, not line by line.
+    // Project every Line's contribution to each product's net delta before any
+    // write. The Negative projection check then sees the whole Entry the way
+    // the diff leaves it, and not Line by Line. This covers a product that two
+    // Lines touch, and a dropped Line beside a raised one.
     const deltaLines: { productId: Id<"products">; delta: number }[] = [];
     for (const line of lines) {
       const signedUnitQuantity = DIRECTION[entry.type] * line.quantity;
@@ -450,9 +453,9 @@ export const editEntry = mutation({
     }
 
     if (!allowNegative) {
-      // Checked one product at a time, in the order it was first touched, so a
-      // product missing further down the entry can't shadow an earlier one's
-      // oversold error with the wrong message.
+      // The loop takes one product at a time, in the order the Entry first
+      // touches it. A missing product further down the Entry therefore cannot
+      // shadow an earlier product's Negative projection message.
       const touchedProductIds = [
         ...new Set(deltaLines.map((l) => l.productId)),
       ];
@@ -472,7 +475,7 @@ export const editEntry = mutation({
       }
     }
 
-    // Dropped lines: reverse their delta and delete the row.
+    // Dropped Lines: reverse the delta and delete the row.
     for (const movement of existing) {
       if (referencedIds.has(movement._id)) continue;
       const product = await ctx.db.get(movement.productId);
@@ -483,11 +486,12 @@ export const editEntry = mutation({
       await ctx.db.delete(movement._id);
     }
 
-    // Existing lines that survive: patch the quantity (a no-op delta when
-    // unchanged) and, for a pull-out, the reason — which lives once per entry
-    // but is stored on every row, so a reason edit has to reach all of them.
-    // The Unit can't change on a surviving line (guarded above), so
-    // `baseEquivalentAtEntry` stays put — only `unitQuantity` is patched.
+    // Surviving Lines: patch the Unit quantity, which is a no-op when the delta
+    // is zero. For a Pull-out, patch the reason too. The reason belongs to the
+    // Entry once, but every row stores it, so a reason edit reaches every row.
+    // The Unit cannot change on a surviving Line, which the guard above
+    // enforces. `baseEquivalentAtEntry` therefore stays put, and only
+    // `unitQuantity` takes a patch.
     for (const line of lines) {
       if (!line.movementId) continue;
       const movement = existingById.get(line.movementId);
@@ -511,10 +515,9 @@ export const editEntry = mutation({
       });
     }
 
-    // New lines: insert and move stock, same as a fresh entry. An omitted
-    // Unit falls back to the product's Default unit, same as
-    // `deliveries.create` — pull-out lines don't yet send one, so they keep
-    // landing on the Base unit.
+    // New Lines: insert and move stock, the same as a fresh Entry. An omitted
+    // Unit falls back to the product's Default unit, the same as
+    // `deliveries.create`.
     for (const line of lines) {
       if (line.movementId) continue;
       const product = await ctx.db.get(line.productId);
@@ -544,19 +547,21 @@ export const editEntry = mutation({
 });
 
 /**
- * Taking back an entry that should never have existed: every line under the
- * header reverses its own signed delta, then the header itself goes. Sale
- * entries are rejected outright, same as `editEntry` — they are corrected
- * from the Register, not here. The negative-stock warning is judged the same
- * way `editEntry`'s is — against the entry's net effect per product, since
- * one entry can touch the same product on more than one line — except every
- * existing movement is reversed rather than diffed against a new line set.
+ * Take back an Entry that should never have existed. Every Line under the
+ * header reverses its own signed delta, and then the header goes.
+ * This mutation refuses a Sale Entry, the same as `editEntry`. The Register
+ * corrects a Sale.
+ * This mutation judges the Negative projection warning the way `editEntry`
+ * does. It takes the Entry's net effect per product, because one Entry can
+ * touch one product on more than one Line.
+ * Here every existing Movement reverses. There is no diff against a new Line
+ * set.
  */
 export const deleteEntry = mutation({
   args: {
     entry: entryRef,
-    // Same backstop as editEntry's: the warning is computed client-side, so
-    // this flag is the record that a human saw it and said yes.
+    // The same backstop as `editEntry`'s. The client computes the warning, so
+    // this flag records that a human saw it and agreed.
     allowNegative: v.optional(v.boolean()),
   },
   handler: async (ctx, { entry, allowNegative }) => {
@@ -568,9 +573,9 @@ export const deleteEntry = mutation({
       .query("stockMovements")
       .withIndex("by_refId", (q) => q.eq("refId", entry.entryId))
       .collect();
-    // Same guard as editEntry's: an entry with no rows at all isn't something
-    // the create mutations ever produce, but a bogus `entryId` should still
-    // be refused rather than silently deleting a header nothing points to.
+    // The same guard as `editEntry`'s. The create mutations never produce an
+    // Entry with no rows. A bogus `entryId` still takes a refusal, because it
+    // must not delete a header nothing points to.
     if (existing.length === 0) {
       throw new Error(`Entry ${entry.entryId} does not exist`);
     }
@@ -583,9 +588,9 @@ export const deleteEntry = mutation({
         productId: movement.productId,
         delta: -deriveBaseAmount(movement),
       }));
-      // Checked one product at a time, in the order it was first touched, so a
-      // product missing further down the entry can't shadow an earlier one's
-      // oversold error with the wrong message.
+      // The loop takes one product at a time, in the order the Entry first
+      // touches it. A missing product further down the Entry therefore cannot
+      // shadow an earlier product's Negative projection message.
       const touchedProductIds = [
         ...new Set(deltaLines.map((l) => l.productId)),
       ];

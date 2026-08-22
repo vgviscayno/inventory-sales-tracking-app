@@ -1,13 +1,16 @@
 "use client";
 
-// The `− Pull-out` bottom sheet — built on the same bones as DeliverySheet
-// (search, tap to add, steppers, remove), plus the reason a delivery never
-// needs and the negative-stock warning the Register already carries (see
-// completeSale in src/app/page.tsx): warn once, one confirm, never block.
+// The `− Pull-out` bottom sheet. It stands on the same bones as DeliverySheet:
+// search, tap to add, steppers, and remove. It adds the reason a Delivery never
+// needs.
+// It also carries the Negative projection warning the Register already carries.
+// See `completeSale` in src/app/page.tsx. The rule is one warning, one confirm,
+// and no block.
 //
-// The same component reopens an existing pull-out for correction: passing
-// `entryId` prefills its reason and lines from `getEntry` instead of starting
-// empty, and save routes through `editEntry`'s diff instead of `create`.
+// The same component reopens an existing Pull-out for a correction. An
+// `entryId` prefills the reason and the Lines from `getEntry` instead of an
+// empty sheet. The save then routes through the diff in `editEntry`, and not
+// `create`.
 
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
@@ -17,18 +20,20 @@ import { findOversold } from "../../../convex/oversold";
 import { formatStock } from "../../../convex/remainderReading";
 import { formatCount } from "../../../convex/unitLabels";
 
-// `key` is the movement's own id when this line was prefilled from an entry
-// under edit, so two lines touching the same product stay distinct rather
-// than colliding on `productId`; a freshly added line gets a synthetic key
-// instead, since adding an already-present product always appends a new line
-// rather than merging into one — the same fix DeliverySheet needed once a
-// product could carry the same line twice in two different Units.
+// `key` is the Movement's own id where the prefill took this Line from an Entry
+// under edit. Two Lines that touch one product therefore stay distinct, and do
+// not collide on `productId`.
+// A freshly added Line takes a synthetic key instead. To add a product the
+// sheet already holds always appends a new Line, and never merges into the
+// existing one. DeliverySheet needed the same fix once one product could carry
+// two Lines in two different Units.
 //
-// `quantity` is a count in the line's own `unitLabel`, not a Base amount —
-// "5 trays" stays "5". Changing the Unit on a prefilled line clears its
-// `movementId` (and `originalBaseAmount`) rather than patching it in place,
-// same as DeliverySheet's `setLineUnit` — see that file's `Line` doc comment
-// for why.
+// `quantity` is a count in the Line's own `unitLabel` and not a Base amount.
+// "5 trays" stays "5".
+// A Unit change on a prefilled Line clears its `movementId` and its
+// `originalBaseAmount`. It does not patch the Line in place. `setLineUnit` in
+// DeliverySheet does the same. See the `Line` doc comment in that file for the
+// reason.
 type Line = {
   key: string;
   movementId?: Id<"stockMovements">;
@@ -74,21 +79,21 @@ export function PulloutSheet({
   const [reasonNotes, setReasonNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Whether she has been shown the below-zero warning yet, cleared whenever
-  // the lines change so consent never carries over to a pull-out she has not
-  // seen — same rule the Register's `warned` follows. Reused as the
-  // second-tap confirm when saving with every line removed, since that save
-  // is a delete said differently — see `handleSave`.
+  // Whether the sheet has shown the Negative projection warning yet. It clears
+  // whenever the Lines change, so consent never carries over to a Pull-out
+  // nobody has seen. `warned` in the Register follows the same rule.
+  // The flag doubles as the second-tap confirm for a save with every Line
+  // removed. That save is a delete said differently. See `handleSave`.
   const [warned, setWarned] = useState(false);
-  // The two-tap confirm for the standalone Delete button, independent of
-  // `warned` and of any unsaved line edits — it deletes the entry as it
-  // actually stands on the ledger.
+  // The two-tap confirm for the standalone Delete button. It is independent of
+  // `warned` and of any unsaved Line edit. The delete takes the Entry as it
+  // stands on the Ledger.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Prefill runs once, the moment the entry loads — not on every re-render of
-  // `existingEntry`, or her in-progress edits would be stomped every time the
-  // query refreshes.
+  // The prefill runs once, at the moment the Entry loads. It must not run on
+  // every re-render of `existingEntry`. A refresh of the query would otherwise
+  // discard an edit in progress.
   const prefilled = useRef(false);
   useEffect(() => {
     if (!isEditing || prefilled.current || existingEntry === undefined) {
@@ -126,8 +131,8 @@ export function PulloutSheet({
     const product = allProducts.find((p) => p._id === productId);
     const unitLabel = product?.defaultUnit.label ?? product?.baseUnitLabel;
     if (!unitLabel) return;
-    // Always appends a new line rather than merging into an existing one for
-    // the same product — a second line for it may need a different Unit.
+    // This always appends a new Line. It never merges into an existing Line for
+    // the same product, because a second Line may need a different Unit.
     setLines((prev) => [
       ...prev,
       { key: `${productId}:${Date.now()}`, productId, unitLabel, quantity: 1 },
@@ -143,10 +148,10 @@ export function PulloutSheet({
           ? {
               ...l,
               unitLabel,
-              // See the `Line` type's doc comment: the Unit and its
-              // Base-equivalent snapshot are one unit of change server-side,
-              // so this turns the line into a fresh insert rather than an
-              // in-place patch `editEntry` would refuse.
+              // The server changes the Unit and its Base equivalent snapshot
+              // together. This turns the Line into a fresh insert, and not the
+              // in-place patch `editEntry` refuses. See the doc comment on the
+              // `Line` type.
               movementId: undefined,
               originalBaseAmount: undefined,
             }
@@ -197,11 +202,12 @@ export function PulloutSheet({
     return unit ? Math.round(quantity * unit.baseEquivalent) : quantity;
   }
 
-  // Net delta per product this save would cause, relative to what's already
-  // on the ledger — zero for every line while logging a fresh pull-out, since
-  // every line there is new. Editing is what can turn a raised or added line
-  // into a bigger loss of stock than the count already reflects, so this is
-  // what the warning below is judged against, not the raw quantity typed.
+  // The net delta per product this save causes, against what the Ledger already
+  // holds. Every Line of a fresh Pull-out is new, so the delta there is the
+  // whole Line.
+  // An edit can raise a Line, or add one. The loss of stock then grows past
+  // what the count reflects. The warning below judges these deltas, and not the
+  // raw typed Unit quantity.
   const deltaLines: { productId: Id<"products">; delta: number }[] = [];
   for (const line of resolvedLines) {
     if (line.deleted) continue;
@@ -221,8 +227,8 @@ export function PulloutSheet({
     );
     for (const original of existingEntry.lines) {
       if (!stillPresent.has(original.movementId)) {
-        // A dropped line reverses its own delta; it was already negative
-        // (pullout), so reversing it adds stock back.
+        // A dropped Line reverses its own delta. A Pull-out delta is already
+        // negative, so the reversal adds stock back.
         deltaLines.push({
           productId: original.productId,
           delta: -original.baseAmount,
@@ -243,11 +249,10 @@ export function PulloutSheet({
     },
   );
 
-  // What deleting the entry outright — via the Delete button — would do to
-  // each product, reckoned from the entry as it stands on the ledger rather
-  // than from any unsaved edits in `lines`: deleting discards those edits
-  // along with the entry, so it has to warn about the entry that will
-  // actually be gone.
+  // What a delete of the whole Entry, through the Delete button, does to each
+  // product. The reckoning comes from the Entry as it stands on the Ledger, and
+  // not from an unsaved edit in `lines`. A delete discards those edits with the
+  // Entry, so the warning must describe the Entry that actually goes.
   const deleteOversold = findOversold(
     (existingEntry?.lines ?? []).map((l) => ({
       productId: l.productId,
@@ -280,10 +285,10 @@ export function PulloutSheet({
   async function handleSave() {
     if (!canSave) return;
 
-    // Removing the last line and saving is deleting the entry said
-    // differently, so it routes through the same `deleteEntry` mutation the
-    // Delete button below calls — and gets the same two-tap confirm, folding
-    // in the negative-stock warning rather than stacking a second dialog.
+    // To remove the last Line and save is a delete said differently. It routes
+    // through the same `deleteEntry` mutation the Delete button below calls,
+    // and takes the same two-tap confirm. The confirm folds in the Negative
+    // projection warning instead of stacking a second dialog.
     if (isDeleteViaEmptySave && entryId) {
       if (!warned) {
         setWarned(true);
@@ -343,8 +348,8 @@ export function PulloutSheet({
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
-      // The server refused, so it is telling her something the client's
-      // counts did not — arm the confirm rather than leaving her stuck.
+      // The server refused, so it knows something the client's counts did not.
+      // Arm the confirm instead of leaving the save stuck.
       setWarned(true);
     } finally {
       setSaving(false);

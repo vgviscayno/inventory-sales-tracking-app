@@ -19,12 +19,13 @@ import { StockStatusPill } from "../../StockStatusPill";
 import { WindowedDayList } from "../../WindowedDayList";
 import { ReadingLadderField } from "../ReadingLadderField";
 
-// Derived from the query rather than restated, so a new field — or a new stock
-// status — reaches this form without anyone remembering to widen a type here.
+// This type derives from the query and does not restate it. A new field, or a
+// new stock status, therefore reaches this form. Nobody has to widen a type
+// here.
 type Product = NonNullable<FunctionReturnType<typeof api.products.get>>;
 
-// A Unit under edit. Held as strings so the number fields can sit empty or
-// half-typed while she works; parsed back to numbers only at save.
+// A Unit under edit. The draft holds strings, so a number field sits empty or
+// half-typed during the edit. The save parses the strings back to numbers.
 type UnitDraft = { label: string; baseEquivalent: string; price: string };
 
 function toDrafts(units: Product["units"]): UnitDraft[] {
@@ -69,15 +70,16 @@ function ProductForm({ product }: { product: Product }) {
   const unarchiveProduct = useMutation(api.products.unarchive);
   const deleteProduct = useMutation(api.products.remove);
 
-  // The saved values, derived fresh from the live product on every render.
-  // A successful save updates `product` (Convex query), so these follow it and
-  // the dirty marks below clear on their own — no remount, no manual resync.
+  // The saved values. Every render derives them fresh from the live product.
+  // A successful save updates the `product` query, so these values follow it.
+  // The dirty marks below then clear on their own. There is no remount and no
+  // manual resync.
   const savedName = product.name;
   const savedUnits = toDrafts(product.units);
   const savedBaseUnitLabel = product.baseUnitLabel;
-  // Only tracked for a multi-Unit product — a single-Unit one has nothing to
-  // choose (its one Unit is already both Base and Default), so it never gets
-  // offered the picker below, and this stays null.
+  // The form tracks this only for a product with several Units. A product with
+  // one Unit has nothing to choose. That Unit is already the Base unit and the Default unit.
+  // The picker below never appears, and this value stays null.
   const savedDefault =
     product.units.length > 1 ? product.defaultUnit.label : null;
   const savedThreshold =
@@ -91,42 +93,43 @@ function ProductForm({ product }: { product: Product }) {
     savedDefault,
   );
   const [lowStockThreshold, setLowStockThreshold] = useState(savedThreshold);
-  // The Reading ladder, held as the set of ticked labels. Order isn't kept
-  // because it isn't read: `buildReadingLadder` sorts by descending Base
-  // equivalent regardless of what was ticked when.
+  // The Reading ladder, held as the set of ticked labels. The draft keeps no
+  // order, because nothing reads one. `buildReadingLadder` sorts by descending
+  // Base equivalent, whatever the order of the ticks.
   const [denominationLabels, setDenominationLabels] = useState<string[]>(
     savedDenominationLabels,
   );
   const [saving, setSaving] = useState(false);
-  // The mutation's refusals — a locked Base unit above all — are the whole
-  // point of some of these edits, so a rejected save has to surface its reason
-  // rather than silently doing nothing.
+  // The mutation refuses some edits, and a locked Base unit is the first of
+  // them. Those refusals are the point of the edit, so a rejected save shows
+  // its reason. It never does nothing in silence.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
-  // Only reached when the product still holds stock — see `handleArchive`.
-  // Archiving is never blocked, so this exists purely so she sees the count
-  // before it happens, not to gate the action itself.
+  // This confirm appears only when the product still holds stock. See
+  // `handleArchive`.
+  // Nothing blocks Archive. This confirm only shows the count first. It does
+  // not gate the action.
   const [confirmingArchive, setConfirmingArchive] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // Delete is one-way, so it gets the same two-tap confirm as archive does —
-  // even though the button is already disabled until the count is zero.
+  // Delete is one way, so it takes the same two-tap confirm as Archive. The
+  // button is already disabled until the count is zero.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isArchived = product.archivedAt != null;
-  // How this product's quantity reads everywhere on this screen — one
-  // resolution so the field, the delete-gate mirror, and the archive confirm
-  // never show two different denominations at once (see CONTEXT.md's
-  // "Remainder reading").
+  // How this product's quantity reads everywhere on this screen. One
+  // resolution serves the field, the delete gate, and the Archive confirm. No
+  // two of them therefore show different Denominations at once. See
+  // "Remainder reading" in CONTEXT.md.
   const formattedQuantity = formatStock(product);
-  // Mirrors the server's gate (see `products.remove`) so what the button
-  // shows and what it's actually allowed to do never disagree.
+  // A mirror of the server gate. See `products.remove`. What the button shows
+  // and what it may do therefore always agree.
   const deleteBlockedReason =
     product.quantityOnHand === 0
       ? null
       : product.quantityOnHand > 0
         ? `${formattedQuantity} still on hand — pull them out first`
         : `${formattedQuantity} on hand — recount to fix before deleting`;
-  // Which entry a ledger row tap opened, if any — opening rows have no
-  // `refId` and so never set this.
+  // Which Entry a tap on a Ledger row opened. Every row carries a `refId`, so
+  // every row opens something. This holds null only while nothing is open.
   const [openEntry, setOpenEntry] = useState<
     | { kind: "delivery"; entryId: Id<"deliveries"> }
     | { kind: "pullout"; entryId: Id<"pullouts"> }
@@ -134,18 +137,19 @@ function ProductForm({ product }: { product: Product }) {
     | null
   >(null);
 
-  // What's edited but not yet saved. Each dirty field flags itself in the form
-  // below (amber rail, "was …", a per-field reset), and the Save button carries
-  // the count — so needing a tap to commit is never a surprise, least of all
-  // for the default-unit swap, which otherwise looks identical once selected.
+  // What the edit changed and the save has not yet committed. Each dirty field
+  // flags itself in the form below. It takes an amber rail, a "was …" line, and
+  // a reset control. The Save button carries the count.
+  // A commit therefore always needs a visible tap. This matters most for a
+  // Default unit swap, which otherwise looks identical once selected.
   const nameDirty = name !== savedName;
   const unitsDirty =
     JSON.stringify(units) !== JSON.stringify(savedUnits) ||
     baseUnitLabel !== savedBaseUnitLabel;
   const defaultDirty = defaultUnitLabel !== savedDefault;
   const thresholdDirty = lowStockThreshold !== savedThreshold;
-  // Compared as a set: which Units are on the ladder is the whole of the
-  // choice, so re-ticking two boxes in the other order is not an edit.
+  // This compares the two ladders as sets. Which Units sit on the ladder is the
+  // whole of the choice. Two boxes ticked in the other order are not an edit.
   const readingDirty = !sameLabels(denominationLabels, savedDenominationLabels);
   const dirtyCount = [
     nameDirty,
@@ -156,19 +160,20 @@ function ProductForm({ product }: { product: Product }) {
   ].filter(Boolean).length;
   const isDirty = dirtyCount > 0;
 
-  // The Base unit's Base equivalent is fixed at 1, so it's parsed but never
-  // entered. The rest mirror the server's `validateUnits` so Save is offered
-  // only when the mutation would accept the list — the throw is still the
-  // guarantee, this just spares her a round-trip to learn the obvious.
+  // The Base unit's Base equivalent is fixed at 1. The form parses it and
+  // never accepts it as input.
+  // The other checks mirror `validateUnits` on the server, so Save appears only
+  // when the mutation accepts the list. The throw is still the guarantee. This
+  // check only saves a round trip to learn the obvious.
   const parsedUnits = units.map((u) => ({
     label: u.label.trim(),
     baseEquivalent: Number(u.baseEquivalent),
     price: Number(u.price),
   }));
-  // The Base and Default markers name a Unit by its label, but the labels are
-  // trimmed on the way to the server — so the markers have to be trimmed to the
-  // same shape, or a stray space would make the Base unit look absent (Save
-  // silently greys, or the mutation rejects a list that's really fine).
+  // The Base marker and the Default marker name a Unit by its label. The save
+  // trims every label on the way to the server, so the markers take the same
+  // trim. A stray space otherwise makes the Base unit look absent. Save then
+  // greys out, or the mutation rejects a list that is really fine.
   const baseUnitTrimmed = baseUnitLabel.trim();
   const labelsLower = parsedUnits.map((u) => u.label.toLowerCase());
   const unitsValid =
@@ -185,20 +190,22 @@ function ProductForm({ product }: { product: Product }) {
 
   const canSave = name.trim().length > 0 && unitsValid;
 
-  // The boxes to offer, asked of the reading itself rather than re-derived
-  // here — the form must never offer a denomination `buildReadingLadder` would drop.
-  // Taken from the drafts rather than the saved product, so ticking a Unit
-  // added, renamed, or re-scaled in this same unsaved edit works. A product
-  // with no coarser Unit at all (a single-Unit one) is never offered the
-  // selector, since its reading is the plain one either way.
+  // The boxes to offer. The reading itself answers this, and the form does not
+  // re-derive it. The form must never offer a Denomination that
+  // `buildReadingLadder` drops.
+  // The answer comes from the drafts and not from the saved product. A tick
+  // therefore works on a Unit that this same unsaved edit added, renamed, or
+  // re-scaled.
+  // A product with no coarser Unit never gets the selector. Its reading is the
+  // plain one either way.
   const denominations = selectableDenominations({
     units: parsedUnits,
     baseUnitLabel: baseUnitTrimmed,
   });
-  // The reading as it would come out if this edit were saved, over the stock
-  // actually on hand. A product holding nothing (or a negative count, which
-  // always reads plainly) has no figure worth previewing, so one of the
-  // coarsest denomination plus one Base unit stands in.
+  // The reading this edit gives once saved, over the stock on hand.
+  // A product that holds nothing has no figure worth a preview. A negative
+  // count has none either, because it always reads plainly. One of the coarsest
+  // Denomination plus one Base unit then stands in.
   const previewAmount =
     product.quantityOnHand > 0
       ? product.quantityOnHand
@@ -222,17 +229,17 @@ function ProductForm({ product }: { product: Product }) {
     );
   }
 
-  // Editing a Unit's label has to drag the Base and Default markers along with
-  // it, since both name a Unit by its label — otherwise renaming the Base unit
-  // would quietly point the marker at a label that no longer exists.
+  // An edit to a Unit's label drags the Base marker and the Default marker
+  // with it. Both markers name a Unit by its label. A rename of the Base unit
+  // otherwise points the marker at a label that no longer exists.
   function editUnit(index: number, field: keyof UnitDraft, value: string) {
     const old = units[index];
     setUnits(units.map((u, i) => (i === index ? { ...u, [field]: value } : u)));
     if (field === "label") {
       if (old.label === baseUnitLabel) setBaseUnitLabel(value);
       if (old.label === defaultUnitLabel) setDefaultUnitLabel(value);
-      // The ladder names its denominations by label too, so a rename has to drag them
-      // with it — otherwise the denomination would silently drop off the reading.
+      // The ladder names its Denominations by label too, so a rename drags them
+      // with it. The Denomination otherwise drops off the reading in silence.
       setDenominationLabels((labels) =>
         labels.map((l) => (l === old.label ? value : l)),
       );
@@ -250,7 +257,7 @@ function ProductForm({ product }: { product: Product }) {
   function removeUnit(index: number) {
     const removed = units[index];
     setUnits(units.filter((_, i) => i !== index));
-    // A removed Default falls back to the Base unit (server does the same).
+    // A removed Default unit falls back to the Base unit. The server agrees.
     if (removed.label === defaultUnitLabel) setDefaultUnitLabel(null);
     setDenominationLabels((labels) =>
       labels.filter((l) => l !== removed.label),
@@ -271,10 +278,10 @@ function ProductForm({ product }: { product: Product }) {
         id: product._id,
         name: name.trim(),
         ...(unitsDirty ? { units: parsedUnits } : {}),
-        // Only sent when it actually moves — the mutation reads a changed
-        // Base unit as a reassignment attempt and locks it behind "no
-        // movements", so an unchanged one (or one differing only by trimmed
-        // whitespace) must not trip that.
+        // The save sends this only when the Base unit moves. It reads a changed
+        // Base unit as a reassignment, and locks that behind "no Movements". An
+        // unchanged Base unit must not trip the lock, and neither must one that
+        // differs only by trimmed whitespace.
         ...(unitsDirty && baseUnitTrimmed !== savedBaseUnitLabel
           ? { baseUnitLabel: baseUnitTrimmed }
           : {}),
@@ -284,14 +291,16 @@ function ProductForm({ product }: { product: Product }) {
         lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
         ...(readingDirty ? { denominationLabels } : {}),
       });
-      // Canonicalize the local drafts to exactly what the reactive query will
-      // hand back, so every dirty mark clears instead of relying on the typed
-      // strings happening to match the saved round-trip. Two mismatches
-      // otherwise leave the Units group amber forever: a price typed "10.50"
-      // (stored 10.5 → "10.5") or a stray space in a label never string-equals
-      // `savedUnits`; and an *unset* Default silently follows the Base unit in
-      // `savedDefault`, so reassigning the Base — or adding a Unit that crosses
-      // 1 → 2 — moves the saved Default out from under a local one that didn't.
+      // Set the local drafts to exactly what the reactive query hands back.
+      // Every dirty mark then clears. Nothing relies on the typed strings
+      // matching the saved round trip by chance.
+      // Two mismatches otherwise leave the Units group amber for good. A price
+      // typed "10.50" stores as 10.5 and comes back as "10.5". A stray space in
+      // a label never equals `savedUnits`.
+      // An unset Default unit also follows the Base unit in `savedDefault`. A
+      // reassigned Base unit therefore moves the saved Default unit. So does a
+      // Unit that takes the count from 1 to 2. The local Default unit does not
+      // move with it.
       setName(name.trim());
       setUnits(
         parsedUnits.map((u) => ({
@@ -304,11 +313,13 @@ function ProductForm({ product }: { product: Product }) {
       setLowStockThreshold(
         lowStockThreshold ? String(Number(lowStockThreshold)) : "",
       );
-      // The Default's resulting stored value: what we sent if it moved,
-      // otherwise the product's own — unless that Unit was just removed, which
-      // the mutation clears (see `products.update`). Then resolve it the one
-      // way `withStatus` does — unset falls back to the Base unit — so it lands
-      // on the same label the refreshed `savedDefault` will.
+      // The Default unit's resulting stored value. It is what the save sent if
+      // the Default unit moved. Otherwise it is the product's own value, unless
+      // this edit removed that Unit, which the mutation clears. See
+      // `products.update`.
+      // The resolution then follows `withStatus`: an unset Default unit falls
+      // back to the Base unit. The value therefore lands on the same label the
+      // refreshed `savedDefault` carries.
       const nextStoredDefault = defaultDirty
         ? (defaultUnitLabel?.trim() ?? null)
         : product.defaultUnitLabel != null &&
@@ -331,10 +342,11 @@ function ProductForm({ product }: { product: Product }) {
     }
   }
 
-  // Only a product still holding stock needs a look before archiving — one
-  // with nothing on hand has nothing to warn about, so it archives on the
-  // first tap. Archiving itself is never refused either way; the confirm
-  // exists only so she sees the count before it disappears from the grid.
+  // Only a product that still holds stock needs a look before Archive. A
+  // product with nothing on hand has nothing to warn about, and archives on the
+  // first tap.
+  // Nothing refuses Archive either way. The confirm only shows the count before
+  // it leaves the grid.
   async function handleArchive() {
     if (product.quantityOnHand !== 0 && !confirmingArchive) {
       setConfirmingArchive(true);
@@ -352,9 +364,9 @@ function ProductForm({ product }: { product: Product }) {
     setArchiving(false);
   }
 
-  // For good — no undo after this, so navigating away is part of the action:
-  // this page has nothing left to show once the product is gone from every
-  // list that would have linked back to it.
+  // Delete has no undo, so the move away is part of the action. This page has
+  // nothing left to show once the product leaves every list that links back to
+  // it.
   async function handleDelete() {
     if (!confirmingDelete) {
       setConfirmingDelete(true);
@@ -587,8 +599,9 @@ const FIELD_INPUT_BASE =
 
 /**
  * Whether two ladders name the same Units. Order is deliberately not part of
- * it — the reading sorts its own denominations (see `buildReadingLadder`), so ticking
- * the same two boxes in the other order has changed nothing to save.
+ * the comparison. The reading sorts its own Denominations. See
+ * `buildReadingLadder`. The same two boxes ticked in the other order therefore
+ * change nothing to save.
  */
 function sameLabels(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -596,8 +609,8 @@ function sameLabels(a: string[], b: string[]): boolean {
   return a.every((label) => inB.has(label));
 }
 
-// An edited input gets an amber border + ring so the change is visible even
-// with the field scrolled past its label.
+// An edited input takes an amber border and ring. The change stays visible
+// when the field scrolls past its label.
 function fieldInputClass(dirty: boolean): string {
   return `${FIELD_INPUT_BASE} ${
     dirty ? "border-amber-400 ring-1 ring-amber-300" : "border-line"
@@ -608,18 +621,19 @@ const UNIT_INPUT =
   "rounded-[8px] border border-line bg-card px-2 py-1.5 text-[14px]";
 
 /**
- * The Units of a product, all editable in place: a label, a Base equivalent
- * (fixed at 1 and read-only for the Base unit), and a price per Unit, plus the
- * two markers — which Unit is the Base and which leads as the Default. Adding a
- * Unit and removing a non-Base one are the same list, so correcting eggs to add
- * a tray, or dropping a Unit she's stopped selling, never leaves this screen.
+ * The Units of a product, all editable in place. Each Unit carries a label, a
+ * Base equivalent, and a price. The Base equivalent is fixed at 1 and read-only
+ * for the Base unit. Two markers sit beside the list: which Unit is the Base
+ * unit, and which Unit leads as the Default unit.
+ * To add a Unit and to drop a Unit are edits to the same list. A correction
+ * that adds a tray to eggs therefore stays on this screen. So does the drop of
+ * a Unit the shop has stopped selling.
  *
- * Two refusals live on the server (see `products.update`) and are mirrored
- * here only as affordances, never as the guarantee: the Base unit can't be
- * removed (it has no remove control), and it can't be reassigned once the
- * product has movements (the Base radios go disabled, with the reason spelt
- * out). The mutation still throws either way, and that throw surfaces below the
- * Save button.
+ * Two refusals live on the server. See `products.update`. This form mirrors
+ * them as affordances and never as the guarantee. The Base unit has no remove
+ * control. The Base radios go disabled once the product has Movements, with the
+ * reason spelt out. The mutation still throws either way, and that throw
+ * appears below the Save button.
  */
 function UnitsEditor({
   units,
@@ -712,10 +726,10 @@ function UnitsEditor({
                   onChange={(e) => onEditUnit(index, "label", e.target.value)}
                   placeholder="Unit name"
                   aria-label={`Unit ${index + 1} name`}
-                  // Renaming the Base unit would move the Base marker, which is
-                  // locked once movements exist (same rule as reassignment).
-                  // Its price stays editable — a price correction isn't a
-                  // reassignment.
+                  // A rename of the Base unit moves the Base marker, which
+                  // locks once Movements exist. This is the rule that governs a
+                  // reassignment. The price stays editable, because a price
+                  // correction is not a reassignment.
                   disabled={isBase && hasMovements}
                   className={`${UNIT_INPUT} min-w-0 flex-1 font-medium ${
                     isBase && hasMovements ? "text-sub" : ""
@@ -821,12 +835,13 @@ function UnitsEditor({
 }
 
 /**
- * A form field that shows, in place, whether it's been edited but not saved:
- * an amber left rail, an "Edited" tag, the saved value struck through, and a
- * one-tap reset. When clean it renders as a plain labelled field, so a settled
- * product carries no marks at all. The label stays a real `<label htmlFor>`
- * when the field wraps a single input; the Units group, which has none, passes
- * no `htmlFor` and gets a plain caption instead.
+ * A form field that shows in place whether an edit has reached it and the save
+ * has not. It carries an amber left rail, an "Edited" tag, the saved value
+ * struck through, and a one-tap reset. A clean field renders as a plain
+ * labelled field, so a settled product carries no marks at all.
+ * The label stays a real `<label htmlFor>` when the field wraps one input. The
+ * Units group wraps no single input. It passes no `htmlFor` and takes a plain
+ * caption instead.
  */
 function DiffField({
   label,
@@ -893,11 +908,12 @@ type OpenEntry =
 
 /**
  * Every `stockMovements` row for this product, newest first under day
- * headings — the answer to "why does it say N?" sitting directly under N.
- * Reuses the Movements tab's day-grouped windowed list so a year of history
- * renders as cheaply here as it does there. Every row is tappable, and
- * reopens the whole entry behind it rather than just this one line — an entry
- * the ledger holds two rows for is still one correction to make.
+ * headings. It answers "why does it say N?" directly under the N.
+ * This list reuses the day-grouped windowed list from the Movements tab. A
+ * year of history therefore renders as cheaply here as it does there.
+ * Every row takes a tap, and the tap reopens the whole Entry behind it and not
+ * the one Line. An Entry the Ledger holds two rows for is still one correction
+ * to make.
  */
 function ProductLedger({
   productId,
@@ -928,12 +944,12 @@ function ProductLedger({
 }
 
 /**
- * The tap handler for one ledger row. Every row has an entry behind it, so
- * every row opens something. `row.refId`'s declared type spans all three
- * header tables regardless of `row.type`; narrowing it to the one table
- * `type` actually names is a cast rather than something the schema ties
- * together, since `stockMovements`' `type` and `refId` fields are validated
- * independently (see schema.ts).
+ * The tap handler for one Ledger row. Every row has an Entry behind it, so
+ * every row opens something.
+ * The declared type of `row.refId` spans all three header tables, whatever
+ * `row.type` holds. To narrow it to the one table `type` names takes a cast.
+ * The schema validates `type` and `refId` independently and ties neither to the
+ * other. See schema.ts.
  */
 function openEntryFor(
   row: LedgerRow,

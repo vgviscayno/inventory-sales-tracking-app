@@ -1,16 +1,16 @@
 "use client";
 
-// The `+ Delivery` bottom sheet — deliberately built like the Register
-// checkout sheet (src/app/page.tsx) so the muscle memory transfers: search a
-// product by name, tap a result to add a line, adjust with steppers or a
-// typed quantity, remove a mis-tapped line, save.
+// The `+ Delivery` bottom sheet. It deliberately follows the sale sheet of the
+// Register (src/app/page.tsx), so the muscle memory transfers.
+// Search a product by name. Tap a result to add a Line. Adjust with the
+// steppers or a typed quantity. Drop a mis-tapped Line, and save.
 //
-// The same component reopens an existing delivery for correction: passing
-// `entryId` prefills its lines from `getEntry` instead of starting empty, and
-// save routes through `editEntry`'s diff instead of `create`. Inline
-// "+ Add as new product" only makes sense while logging a fresh shipment, so
-// it's hidden once editing — a forgotten line here names a product already in
-// the catalog.
+// The same component reopens an existing Delivery for a correction. An
+// `entryId` prefills the Lines from `getEntry` instead of an empty sheet. The
+// save then routes through the diff in `editEntry`, and not `create`.
+// Inline "+ Add as new product" only makes sense while somebody logs a fresh
+// shipment. The sheet hides it during an edit, because a forgotten Line there
+// names a product the catalog already holds.
 
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
@@ -21,26 +21,29 @@ import { formatStock } from "../../../convex/remainderReading";
 import { formatCount } from "../../../convex/unitLabels";
 import { SupplierPicker } from "../SupplierPicker";
 
-// A line either names a product that already exists, or (once "+ Add as new
-// product" is chosen) is still collecting the name and price it'll be
-// created with — `key` gives both kinds a stable identity for React and for
-// the bump/setQuantity/removeLine calls below, which don't otherwise care
-// which kind they're touching. An existing line prefilled from an entry under
-// edit carries `movementId` and the `originalBaseAmount` it opened with, so
-// the diff sent to `editEntry` is judged against what this line actually was
-// — not against the product's live count, which other entries may have moved
-// since. A line's `key` is its `movementId` when it has one, so two prefilled
-// lines for the same product (one entry can touch a product twice) stay
-// distinct rather than colliding on `productId`.
+// A Line either names a product that already exists, or collects the name and
+// price to create one with. The second kind appears once somebody chooses
+// "+ Add as new product".
+// `key` gives both kinds a stable identity, for React and for the `bump`,
+// `setQuantity`, and `removeLine` calls below. Those calls do not care which
+// kind they touch.
+// A Line prefilled from an Entry under edit carries `movementId` and the
+// `originalBaseAmount` it opened with. The diff that reaches `editEntry` is
+// therefore judged against what this Line was. It is not judged against the
+// product's live count, which other Entries may have moved.
+// A Line's `key` is its `movementId` where it has one. Two prefilled Lines for
+// one product therefore stay distinct, and do not collide on `productId`. One
+// Entry can touch one product twice.
 //
-// An existing line's `quantity` is a count in its own `unitLabel`, not a Base
-// amount — "5 trays" stays "5", not "150". Changing the Unit on a prefilled
-// line clears its `movementId` (and `originalBaseAmount`) rather than patching
-// it in place: `editEntry` refuses an in-place Unit change on a surviving row
-// (the Unit and its Base equivalent are snapshotted together), so the sheet
-// gets the same ordinary-edit feel by turning that line into a fresh insert
-// and letting the old row fall out of the diff as a drop. The strictness
-// lives server-side; from here it just looks like picking a different Unit.
+// A prefilled Line's `quantity` is a count in its own `unitLabel` and not a
+// Base amount. "5 trays" stays "5" and does not become "150".
+// A Unit change on a prefilled Line clears its `movementId` and its
+// `originalBaseAmount`. It does not patch the Line in place. `editEntry`
+// refuses an in-place Unit change on a surviving row. That row snapshots the
+// Unit and its Base equivalent together.
+// The sheet therefore turns that Line into a fresh insert. The old row falls
+// out of the diff as a drop. The strictness lives on the server. From here it
+// looks like a choice of a different Unit.
 type Line =
   | {
       kind: "existing";
@@ -94,21 +97,22 @@ export function DeliverySheet({
   const [supplierId, setSupplierId] = useState<Id<"suppliers"> | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Whether she has been shown the below-zero warning yet, cleared whenever
-  // the lines change so consent never carries over to an edit she has not
-  // seen — same rule the Register's `warned` follows. Reused as the
-  // second-tap confirm when saving with every line removed, since that save
-  // is a delete said differently — see `handleSave`.
+  // Whether the sheet has shown the Negative projection warning yet. It clears
+  // whenever the Lines change, so consent never carries over to an edit nobody
+  // has seen. `warned` in the Register follows the same rule.
+  // The flag doubles as the second-tap confirm for a save with every Line
+  // removed. That save is a delete said differently. See `handleSave`.
   const [warned, setWarned] = useState(false);
-  // The two-tap confirm for the standalone Delete button, independent of
-  // `warned` and of any unsaved line edits — it deletes the entry as it
-  // actually stands on the ledger.
+  // The two-tap confirm for the standalone Delete button. It is independent of
+  // `warned` and of any unsaved Line edit. The delete takes the Entry as it
+  // stands on the Ledger.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Prefill runs once, the moment the entry loads — not on every re-render of
-  // `existingEntry`, or her in-progress edits would be stomped every time the
-  // query refreshes (e.g. a product she's not even touching gets renamed).
+  // The prefill runs once, at the moment the Entry loads. It must not run on
+  // every re-render of `existingEntry`. A refresh of the query would otherwise
+  // discard an edit in progress. A rename of a product this sheet does not
+  // touch is one such refresh.
   const prefilled = useRef(false);
   useEffect(() => {
     if (!isEditing || prefilled.current || existingEntry === undefined) {
@@ -177,10 +181,10 @@ export function DeliverySheet({
           ? {
               ...l,
               unitLabel,
-              // The Unit and its Base-equivalent snapshot are one unit of
-              // change server-side — dropping the movement id turns this
-              // into a fresh insert rather than an in-place patch `editEntry`
-              // would refuse. See the `Line` type's doc comment.
+              // The server changes the Unit and its Base equivalent snapshot
+              // together. To drop the movement id turns this Line into a fresh
+              // insert, and not the in-place patch `editEntry` refuses. See the
+              // doc comment on the `Line` type.
               movementId: undefined,
               originalBaseAmount: undefined,
             }
@@ -254,11 +258,11 @@ export function DeliverySheet({
     return product ? [{ ...line, product }] : [];
   });
 
-  // Net delta per product this save would cause, relative to what's already
-  // on the ledger — zero for every line while logging a fresh delivery, since
-  // every line there is new. Editing is what can turn a lowered or dropped
-  // line into a loss of stock, so this is what the warning below is judged
-  // against, not the raw quantity typed.
+  // The net delta per product this save causes, against what the Ledger already
+  // holds. Every Line of a fresh Delivery is new, so the delta there is the
+  // whole Line.
+  // An edit is what turns a lowered or dropped Line into a loss of stock. The
+  // warning below judges these deltas, and not the raw typed Unit quantity.
   const deltaLines: { productId: Id<"products">; delta: number }[] = [];
   for (const line of resolvedLines) {
     if (line.kind !== "existing") continue;
@@ -300,11 +304,10 @@ export function DeliverySheet({
     },
   );
 
-  // What deleting the entry outright — via the Delete button — would do to
-  // each product, reckoned from the entry as it stands on the ledger rather
-  // than from any unsaved edits in `lines`: deleting discards those edits
-  // along with the entry, so it has to warn about the entry that will
-  // actually be gone.
+  // What a delete of the whole Entry, through the Delete button, does to each
+  // product. The reckoning comes from the Entry as it stands on the Ledger, and
+  // not from an unsaved edit in `lines`. A delete discards those edits with the
+  // Entry, so the warning must describe the Entry that actually goes.
   const deleteOversold = findOversold(
     (existingEntry?.lines ?? []).map((l) => ({
       productId: l.productId,
@@ -340,10 +343,10 @@ export function DeliverySheet({
   async function handleSave() {
     if (!canSave) return;
 
-    // Removing the last line and saving is deleting the entry said
-    // differently, so it routes through the same `deleteEntry` mutation the
-    // Delete button below calls — and gets the same two-tap confirm, folding
-    // in the negative-stock warning rather than stacking a second dialog.
+    // To remove the last Line and save is a delete said differently. It routes
+    // through the same `deleteEntry` mutation the Delete button below calls,
+    // and takes the same two-tap confirm. The confirm folds in the Negative
+    // projection warning instead of stacking a second dialog.
     if (isDeleteViaEmptySave && entryId) {
       if (!warned) {
         setWarned(true);
@@ -420,8 +423,8 @@ export function DeliverySheet({
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
-      // The server refused, so it is telling her something the client's
-      // counts did not — arm the confirm rather than leaving her stuck.
+      // The server refused, so it knows something the client's counts did not.
+      // Arm the confirm instead of leaving the save stuck.
       setWarned(true);
     } finally {
       setSaving(false);
