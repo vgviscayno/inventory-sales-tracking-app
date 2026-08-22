@@ -1,21 +1,24 @@
 /**
- * The below-zero check, extracted once so a cart, a delivery/pull-out edit
- * diff, and the server mutations that mirror them all judge a set of lines
- * the same way — netted per product, not line by line, so two lines of one
- * product (or a raised line beside a dropped one) can't cancel out unseen.
- * This is what makes the check safe to re-key once a cart can hold more than
- * one line per product: the summing lives here instead of six hand-rolled
- * copies, one of which would otherwise quietly stop catching it.
+ * The Negative projection check, extracted once. The callers include a cart, a
+ * Delivery edit diff, and a Pull-out edit diff. The delete path on both movement
+ * sheets is a caller, and so are the server mutations that mirror them. All of
+ * them judge a set of Lines the same way.
+ * The check nets the Lines per product, and not Line by Line. Two Lines of one
+ * product therefore cannot cancel out unseen. Neither can a raised Line beside
+ * a dropped one.
+ * The summing lives here, and not in a copy per caller. One such copy would
+ * otherwise stop catching the case once a cart holds more than one Line per
+ * product.
  *
- * `delta` is signed the way a ledger movement is: positive adds stock,
- * negative removes it. A caller working in "quantity taken" terms (a sale, a
- * pull-out) passes `-quantity`; a caller already holding a signed net delta
- * (an edit diff) passes it straight through.
+ * `delta` carries the sign a Movement carries: positive adds stock, negative
+ * removes it. A caller that works in "quantity taken" terms passes
+ * `-quantity`. A Sale and a Pull-out are two such callers. A caller that
+ * already holds a signed net delta passes it through, as an edit diff does.
  *
- * A product absent from `products` is skipped rather than treated as a zero
- * count — every caller already knows to leave out products it can't or
- * shouldn't judge (a deleted product still named on an old ledger line), and
- * defaulting to zero here would turn "unknown" into a false warning.
+ * The loop skips a product absent from `products`. It does not read the
+ * absence as a zero count. Every caller already leaves out the products it
+ * cannot judge. A deleted product still named on an old Ledger row is one such
+ * product. A zero here would turn "unknown" into a false warning.
  */
 
 export type OversoldLine<ProductId> = {

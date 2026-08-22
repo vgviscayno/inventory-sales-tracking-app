@@ -27,9 +27,9 @@ async function computeBalance(ctx: QueryCtx, customerId: Id<"customers">) {
 
 export const list = query({
   args: {
-    // Every caller that doesn't ask otherwise gets active customers only —
-    // the Register's picker, the Customers list's main section. Only the
-    // collapsed Archived section asks for `"withArchived"`.
+    // A caller that asks for nothing gets active customers only. This covers
+    // the Register's picker and the main section of the Customers list. Only
+    // the collapsed Archived section asks for `"withArchived"`.
     include: v.optional(
       v.union(v.literal("active"), v.literal("withArchived")),
     ),
@@ -66,10 +66,10 @@ export const update = mutation({
   args: {
     id: v.id("customers"),
     name: v.optional(v.string()),
-    // null clears notes back to unset; omitted leaves the existing value
-    // untouched (Convex drops `undefined` args before the mutation runs, so
-    // `undefined` can't signal "clear") — same trap and workaround as
-    // `products.update`'s `lowStockThreshold`.
+    // `null` clears the notes back to unset. An omitted value leaves the
+    // stored value untouched. Convex drops an `undefined` arg before the
+    // mutation runs, so `undefined` cannot mean "clear". This is the same trap
+    // and the same workaround as `lowStockThreshold` in `products.update`.
     notes: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, { id, notes, ...patch }) => {
@@ -81,10 +81,11 @@ export const update = mutation({
 });
 
 /**
- * Archive is never gated — the person she most wants off the main list is
- * often the one who owes money, so a debt can never be the reason archiving
- * refuses. Nothing here touches `sales` or `payments`; archiving changes
- * visibility, never the ledger a balance is computed from.
+ * Nothing gates Archive. The customer the shop most wants off the main list is
+ * often the one who owes money. A debt is therefore never a reason for Archive
+ * to refuse.
+ * Nothing here touches `sales` or `payments`. Archive changes visibility, and
+ * never the Account history a balance comes from.
  */
 export const archive = mutation({
   args: { id: v.id("customers") },
@@ -94,7 +95,8 @@ export const archive = mutation({
 });
 
 /**
- * The one-tap reversal — no confirm, same reasoning as `products.unarchive`.
+ * The one-tap reversal. There is no confirm. The reasoning is the same as in
+ * `products.unarchive`.
  */
 export const unarchive = mutation({
   args: { id: v.id("customers") },
@@ -104,16 +106,17 @@ export const unarchive = mutation({
 });
 
 /**
- * Gated on both halves of the state the client can't be trusted to have
- * checked: archived (she's decided this customer isn't coming back) and
- * settled (the balance is exactly zero). Unlike a product's count, a
- * customer's balance is gated in *either* direction — an overpayment is
- * still money the shop owes back, so it blocks deletion exactly like a debt
- * does. A settled customer with years of sale and payment history still
- * deletes: there is no gate on ledger history anywhere, only on balance. A
- * soft patch rather than `ctx.db.delete`, so every `sales` and `payments`
- * row survives untouched and a deleted customer's name keeps rendering
- * wherever it's already been named.
+ * Delete gates on two halves of the state that the client cannot be trusted to
+ * have checked. The customer is archived, which is the decision that this
+ * customer is not coming back. The customer is settled, which is a balance of
+ * exactly zero.
+ * A balance gates in either direction, unlike a product's count. An overpayment
+ * is money the shop owes back, so it blocks the delete exactly as a debt does.
+ * A settled customer with years of Account history still deletes. Nothing
+ * gates on the history anywhere. The gate is on the balance alone.
+ * The handler patches a timestamp and does not call `ctx.db.delete`. Every
+ * `sales` and `payments` row therefore survives untouched. A deleted customer
+ * still shows its name wherever it is already named.
  */
 export const remove = mutation({
   args: { id: v.id("customers") },

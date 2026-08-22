@@ -1,3 +1,12 @@
+/**
+ * A Payment is money a customer hands over against a balance. It names the
+ * customer and never a Sale. `computeBalance` in `customers.ts` nets the
+ * Payments against the total of that customer's Utang sales. No Payment
+ * therefore pays off, settles, or closes a Sale. See "Payment" in CONTEXT.md.
+ * `remove` calls `ctx.db.delete`. A Payment carries no lifecycle timestamp,
+ * unlike a product or a customer. A deleted Payment therefore raises the
+ * customer's balance at the next read, and leaves no record of itself.
+ */
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 

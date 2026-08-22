@@ -6,38 +6,40 @@ import { entryLines, recordMovement } from "./stockMovements";
 
 export const create = mutation({
   args: {
-    // A line either names a product that already exists, or carries what's
-    // needed to create one — the `kind` literal makes that a type the
-    // handler can switch on instead of a productId/newProduct pair whose
-    // both-or-neither states have to be rejected by hand.
+    // A Line either names a product that already exists, or carries what a new
+    // product needs. The `kind` literal makes that a type the handler switches
+    // on. Without it the args would carry a `productId` beside a new-product
+    // object. The handler would then reject the both-or-neither states by hand.
     lines: v.array(
       v.union(
         v.object({
           kind: v.literal("existing"),
           productId: v.id("products"),
-          // The Unit this line's quantity is entered in. Omitted falls back
-          // to the product's Default unit — see `resolveDefaultUnitLabel` — so a
-          // caller that doesn't care about Units (most existing tests, the
-          // "new" line's own creation path) still lands on the Base unit a
-          // single-Unit product always defaults to.
+          // The Unit this Line's quantity is entered in. An omitted value
+          // falls back to the product's Default unit. See
+          // `resolveDefaultUnitLabel`.
+          // A caller that does not care about Units therefore still lands on
+          // the Base unit. A single-Unit product always defaults to it. Most
+          // existing tests and the "new" Line's own creation path are such
+          // callers.
           unitLabel: v.optional(v.string()),
           quantity: v.number(),
         }),
         v.object({
           kind: v.literal("new"),
           name: v.string(),
-          // The single Unit this quick-created product starts with — its
-          // Base unit. No default is offered here either (see
-          // docs/adr/0004-base-unit-locked.md): a plausible-looking one is
-          // how a product ends up based in the wrong Unit.
+          // The single Unit this quick-created product starts with, which is
+          // its Base unit. Nothing offers a default here either. A plausible
+          // default is how a product ends up based in the wrong Unit. See
+          // docs/adr/0004-base-unit-locked.md.
           unitLabel: v.string(),
           price: v.number(),
           quantity: v.number(),
         }),
       ),
     ),
-    // Optional — stock bought retail, received as a gift, or from someone
-    // she doesn't need to name is still recordable.
+    // Optional. The shop still records stock it bought retail or received as a
+    // gift. It also records stock from somebody it does not name.
     supplierId: v.optional(v.id("suppliers")),
   },
   handler: async (ctx, { lines, supplierId }) => {
@@ -63,11 +65,12 @@ export const create = mutation({
       supplierId,
     });
 
-    // One `recordMovement` call per line, even when two lines name the same
-    // product — each is its own arrival on its own row, not a quantity to
-    // merge before it reaches the ledger. A line's product is created here,
-    // inside the same mutation as the delivery it arrived on, so the two
-    // either land together or (on any failure) neither does.
+    // One `recordMovement` call per Line, even when two Lines name the same
+    // product. Each Line is its own arrival on its own row. The handler never
+    // merges two Unit quantities before they reach the Ledger.
+    // The handler creates a Line's product here, inside the same mutation as
+    // the Delivery it arrived on. The two therefore land together, or on any
+    // failure neither lands.
     for (const line of lines) {
       let productId: Id<"products">;
       let unitLabel: string;
@@ -99,9 +102,9 @@ export const create = mutation({
 });
 
 /**
- * Deliveries newest first, each with its lines joined to the product name at
- * the time of reading and the net change the whole entry carried — the shape
- * the Movements tab renders one row per delivery from.
+ * Deliveries newest first. Each Delivery carries its Lines and the net change
+ * the whole Entry carried. Each Line joins to the product name at the moment of
+ * the read. The Movements tab renders one row per Delivery from this shape.
  */
 export const list = query({
   args: {},

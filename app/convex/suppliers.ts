@@ -4,8 +4,8 @@ import { filterLifecycle } from "./lifecycle";
 
 export const list = query({
   args: {
-    // Every caller that doesn't ask otherwise gets active suppliers only —
-    // the delivery sheet's picker and the Suppliers list's main section.
+    // A caller that asks for nothing gets active suppliers only. This covers
+    // the Delivery sheet's picker and the main section of the Suppliers list.
     // Only the collapsed Archived section asks for `"withArchived"`.
     include: v.optional(
       v.union(v.literal("active"), v.literal("withArchived")),
@@ -18,9 +18,10 @@ export const list = query({
 });
 
 /**
- * Unfiltered by lifecycle — the picker's "included by id" half, which has to
- * find an archived or deleted supplier `list` above would hide, so an
- * unrelated edit to a delivery never silently blanks who supplied it.
+ * No lifecycle filter runs here. This query is the picker's "included by id"
+ * half. It must find an archived or a deleted supplier that `list` above
+ * hides. An unrelated edit to a Delivery would otherwise blank who supplied it,
+ * and nothing on screen would say so.
  */
 export const get = query({
   args: { id: v.id("suppliers") },
@@ -36,8 +37,9 @@ export const update = mutation({
   args: {
     id: v.id("suppliers"),
     name: v.optional(v.string()),
-    // null clears notes back to unset; omitted leaves the existing value
-    // untouched — same trap and workaround as `customers.update`'s notes.
+    // `null` clears the notes back to unset. An omitted value leaves the
+    // stored value untouched. This is the same trap and the same workaround as
+    // the notes in `customers.update`.
     notes: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, { id, notes, ...patch }) => {
@@ -49,9 +51,9 @@ export const update = mutation({
 });
 
 /**
- * Archive is never gated, same reasoning as `customers.archive`. Nothing
- * here touches `deliveries`; archiving changes visibility, never a delivery
- * already attached to this supplier.
+ * Nothing gates Archive. The reasoning is the same as in `customers.archive`.
+ * Nothing here touches `deliveries`. Archive changes visibility, and never a
+ * Delivery already attached to this supplier.
  */
 export const archive = mutation({
   args: { id: v.id("suppliers") },
@@ -61,7 +63,8 @@ export const archive = mutation({
 });
 
 /**
- * The one-tap reversal — no confirm, same reasoning as `customers.unarchive`.
+ * The one-tap reversal. There is no confirm. The reasoning is the same as in
+ * `customers.unarchive`.
  */
 export const unarchive = mutation({
   args: { id: v.id("suppliers") },
@@ -71,12 +74,13 @@ export const unarchive = mutation({
 });
 
 /**
- * Gated on archived-first only — unlike `customers.remove`, there is no
- * balance or other second condition to check, so a dangling `supplierId` on
- * a delivery is the only thing this leaves behind, and that reference has a
- * legal absent representation. A soft patch rather than `ctx.db.delete`, so
- * a deleted supplier's name keeps rendering on every delivery it's already
- * named.
+ * Delete gates on the archived state alone. There is no balance and no second
+ * condition to check, unlike `customers.remove`.
+ * A dangling `supplierId` on a Delivery is the only thing this leaves behind.
+ * That reference has a legal absent representation.
+ * The handler patches a timestamp and does not call `ctx.db.delete`. A deleted
+ * supplier therefore still shows its name on every Delivery it is already
+ * named on.
  */
 export const remove = mutation({
   args: { id: v.id("suppliers") },

@@ -9,18 +9,19 @@ export const create = mutation({
     lines: v.array(
       v.object({
         productId: v.id("products"),
-        // The Unit this line's quantity is entered in. Omitted falls back to
-        // the product's Default unit, same as `deliveries.create` — a tray
-        // dropped is one tray damaged, not thirty pieces.
+        // The Unit this Line's quantity is entered in. An omitted value falls
+        // back to the product's Default unit, the same as `deliveries.create`.
+        // A tray dropped is one tray damaged, and not thirty pieces.
         unitLabel: v.optional(v.string()),
         quantity: v.number(),
       }),
     ),
     reasonCategory,
     reasonNotes: v.optional(v.string()),
-    // Same backstop as sales.create's allowNegative: the warning is computed
-    // client-side, so this flag is the record that a human saw it and said
-    // yes. One flag for the whole entry, not one per line.
+    // The same backstop as `allowNegative` in `sales.create`. The client
+    // computes the Negative projection warning, so this flag is the record that
+    // a person saw it and agreed. One flag covers the whole Entry, and not one
+    // Line.
     allowNegative: v.optional(v.boolean()),
   },
   handler: async (
@@ -35,7 +36,7 @@ export const create = mutation({
         throw new Error("Each pull-out line must have a positive quantity");
       }
     }
-    // A reason that means nothing on its own is never left unexplained.
+    // The reason "other" says nothing on its own, so a note explains it.
     if (reasonCategory === "other" && !reasonNotes?.trim()) {
       throw new Error('A note is required when the reason is "other"');
     }
@@ -52,9 +53,9 @@ export const create = mutation({
     );
 
     if (!allowNegative) {
-      // Summed per product, so two lines of the same product — even in two
-      // Units — are judged on what the pull-out actually takes rather than
-      // line by line.
+      // The check sums per product, so two Lines of one product give one
+      // judgement. The two Lines may name different Units. The judgement is on
+      // what the Pull-out takes, and not on each Line alone.
       const oversold = findOversold(
         resolvedLines.map(({ line, baseAmount }) => ({
           productId: line.productId,
@@ -97,10 +98,11 @@ export const create = mutation({
 });
 
 /**
- * Pull-outs newest first, each with its lines joined to the product name at
- * the time of reading and the net change the whole entry carried — the shape
- * the Movements tab renders one row per pull-out from. The reason lives once
- * per entry: every line of a pull-out shares the reason picked for it.
+ * Pull-outs newest first. Each Pull-out carries its Lines and the net change
+ * the whole Entry carried. Each Line joins to the product name at the moment of
+ * the read. The Movements tab renders one row per Pull-out from this shape.
+ * Every Movement of one Pull-out carries the same reason. This query therefore
+ * reads the reason from the first row.
  */
 export const list = query({
   args: {},

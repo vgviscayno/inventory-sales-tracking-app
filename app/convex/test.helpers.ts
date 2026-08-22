@@ -1,5 +1,5 @@
-// Not a `*.test.ts` file, but it calls `import.meta.glob` below, which is the
-// only reason the directive is ever needed.
+// This file is not a `*.test.ts` file. It calls `import.meta.glob` below, which
+// is the only reason the directive is ever needed.
 /// <reference types="vite/client" />
 
 import type { Infer } from "convex/values";
@@ -11,8 +11,9 @@ import schema, { type unitValidator } from "./schema";
 import { deriveBaseAmount } from "./stockMovements";
 
 // The Convex bundler leaves test files and this helper module out of the
-// deployed function set. Apply the same rule here — vite's glob has no working
-// extglob — so convex-test loads the real functions and nothing else.
+// deployed function set. This filter applies the same rule, because vite's glob
+// has no working extglob. convex-test therefore loads the real functions and
+// nothing else.
 const isTestModule = (path: string) =>
   /\.test\.\w+$/.test(path) || /(^|\/)test\.helpers\.\w+$/.test(path);
 
@@ -32,21 +33,23 @@ export type TestConvex = ReturnType<typeof setupTest>;
 type UnitOverride = Infer<typeof unitValidator>;
 
 /**
- * A product created through the public mutation, holding `quantityOnHand` —
- * stocked the only way production can stock one, by logging a delivery for
- * it, so the product satisfies `expectCacheMatchesLedger` from birth.
- * `quantityOnHand` is positional because it is the point of the fixture;
+ * A product created through the public mutation, holding `quantityOnHand`. The
+ * fixture stocks it the only way production stocks one, by logging a Delivery
+ * for it. The product therefore satisfies `expectCacheMatchesLedger` from
+ * birth.
+ * `quantityOnHand` is positional because it is the point of the fixture.
  * `overrides` covers everything else.
  *
- * The delivery is denominated in the product's Base unit, so the count asked
- * for is the count arrived at whatever the other Units say. A zero holding
- * logs nothing: a delivery line must be positive, and a product born at zero
- * with an empty ledger already reconciles.
+ * The Delivery is denominated in the product's Base unit. The count asked for
+ * is therefore the count arrived at, whatever the other Units say.
+ * A holding of zero logs nothing. A Delivery Line must be positive, and a
+ * product born at zero with an empty Ledger already reconciles.
  *
- * Defaults to a single Unit ("pc") so existing tests stay short and can keep
- * passing `sellingPrice` as a flat number. Pass `units` (and, if it isn't the
- * first one, `baseUnitLabel`) for a test that needs more than one Unit — a
- * tray of eggs alongside the piece, say.
+ * The fixture defaults to a single Unit, "pc". Existing tests therefore stay
+ * short and keep passing `sellingPrice` as a flat number. A test that needs
+ * more than one Unit passes `units`. It also passes `baseUnitLabel` when the
+ * Base unit is not the first Unit. A tray of eggs alongside the piece is one
+ * such test.
  */
 export async function aProductHolding(
   t: TestConvex,
@@ -88,9 +91,9 @@ export async function aSupplier(t: TestConvex, name = "Mang Kanor Trading") {
 }
 
 /**
- * The invariant this whole feature exists to protect: a product's cached
- * `quantityOnHand` is the sum of its `stockMovements` rows, never a number
- * anyone typed. Reach for this after any sequence of ledger writes.
+ * The invariant this whole feature exists to protect. A product's cached
+ * `quantityOnHand` is the sum of its `stockMovements` rows, and never a number
+ * anyone typed. Call this after any sequence of Ledger writes.
  */
 export async function expectCacheMatchesLedger(
   t: TestConvex,
@@ -99,11 +102,12 @@ export async function expectCacheMatchesLedger(
   const product = await t.query(api.products.get, { id: productId });
   if (!product) throw new Error(`No product with id ${productId}`);
 
-  // The raw ledger is deliberately read raw: this assertion's whole job is to
-  // check the cache against the rows themselves, so going through a query that
-  // derives anything would weaken it. The product side goes through the public
-  // query, which is where drift would actually be observed. `deriveBaseAmount`
-  // is a pure formula, not a read, so folding through it doesn't weaken that.
+  // This assertion reads the Ledger raw, and does so deliberately. Its whole
+  // job is to check the cache against the rows themselves. A query that derives
+  // anything would weaken it.
+  // The product side goes through the public query, which is where drift shows.
+  // `deriveBaseAmount` is a pure formula and not a read, so the fold through it
+  // weakens nothing.
   const movements = await t.run(async (ctx) =>
     ctx.db
       .query("stockMovements")

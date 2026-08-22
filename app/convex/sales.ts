@@ -23,10 +23,11 @@ export const listForCustomer = query({
 });
 
 /**
- * Sales newest first, each with its lines joined to the product name at the
- * time of reading, the net change the whole entry carried, and the
- * customer's name when the sale named one — the shape the Movements tab
- * renders one row per sale from, once sales are opted into that view.
+ * Sales newest first. Each Sale carries its Lines and the net change the whole
+ * Entry carried. It also carries the customer's name when the Sale names one.
+ * Each Line joins to the product name at the moment of the read.
+ * The Movements tab renders one row per Sale from this shape, once somebody
+ * opts Sales into that view.
  */
 export const list = query({
   args: {},
@@ -65,11 +66,13 @@ export const create = mutation({
         quantity: v.number(),
       }),
     ),
-    // One flag for the whole sale, not one per line: it records the fact that a
-    // human was warned and said yes, and there is one such gesture per save.
-    // The warning itself has to be computed client-side — a mutation cannot ask
-    // mid-flight — so this is the backstop that stops a script, or a surface
-    // that forgot to warn, from driving stock negative with nobody looking.
+    // One flag covers the whole Sale, and not one Line. It records that a
+    // person saw the warning and agreed, and there is one such gesture per
+    // save.
+    // The client computes the Negative projection warning, because a mutation
+    // cannot ask mid-flight. This flag is therefore the backstop. It stops a
+    // script, or a surface that forgot to warn, from driving stock negative
+    // with nobody looking.
     allowNegative: v.optional(v.boolean()),
   },
   handler: async (ctx, { customerId, paymentMethod, items, allowNegative }) => {
@@ -89,10 +92,10 @@ export const create = mutation({
     );
 
     if (!allowNegative) {
-      // Summed per product in Base units, so two lines of the same product —
-      // in the same Unit or different ones — are judged on what the sale
-      // actually takes off the shelf, not line by line and not in whichever
-      // Unit each line happened to be rung up in.
+      // The check sums per product in Base units, so two Lines of one product
+      // give one judgement. The two Lines may name the same Unit or different
+      // Units. The judgement is on what the Sale takes off the shelf. It is not
+      // per Line, and not in whichever Unit each Line was rung up in.
       const oversold = findOversold(
         resolvedItems.map(({ item, unit }) => ({
           productId: item.productId,

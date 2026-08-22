@@ -1,10 +1,12 @@
 /**
- * The uniform two-state lifecycle: `archivedAt` and `deletedAt`, absent
- * meaning active. This module is the one place that predicate is spelled out
- * — every handler that filters a lifecycle-bearing table calls in here rather
- * than retyping "both fields undefined" in six places. What varies per entity
- * (whether archiving is gated, what unarchiving means) lives in the gates
- * each module writes for itself, not here.
+ * The uniform two-state lifecycle. `archivedAt` and `deletedAt` are both absent
+ * on an active row.
+ * This module is the one place the predicate is spelled out. Every handler that
+ * filters a lifecycle-bearing table calls in here. No handler retypes "both
+ * fields undefined" for products, customers, and suppliers.
+ * What varies per entity lives in the gates each module writes for itself.
+ * Whether Archive is gated, and what Delete may not remove, are two such
+ * differences.
  */
 
 export type Lifecycle = {
@@ -17,11 +19,12 @@ export function isActive(doc: Lifecycle): boolean {
 }
 
 /**
- * `"active"` is every caller's default — a picker, a grid, a search result —
- * so archived rows stop being selectable without any caller having to ask for
- * that explicitly. `"withArchived"` is for the one place that needs archived
- * rows back: the collapsed Archived section. Deleted rows never come back
- * through either value, for products or customers alike.
+ * `"active"` is every caller's default. A picker, a grid, and a search result
+ * all take it. An archived row therefore stops being selectable, and no caller
+ * asks for that.
+ * `"withArchived"` serves the one place that needs archived rows back, the
+ * collapsed Archived section.
+ * A deleted row never comes back through either value.
  */
 export function filterLifecycle<T extends Lifecycle>(
   docs: T[],
