@@ -1,8 +1,10 @@
 # Comments
 
 The house standard for code comments in this repo. It is written down because it was
-tacit: six files carry careful domain prose, eighteen carry none, and the style was
-being rediscovered or ignored one session at a time.
+tacit: six files carried careful domain prose, eighteen carried none, and the style was
+being rediscovered or ignored one session at a time. The sweep since then changed the
+shape of that: 47 of the 57 files in `convex/` and `src/` now carry comments, and 10
+stay bare. `_generated` is excluded from both counts.
 
 Two rules decide everything: a comment earns its lines by **non-derivability**, and it
 is written in the **ASD-STE100 register**. Everything below is those two rules, their
@@ -146,17 +148,20 @@ Before:
 After:
 
 ```ts
-// The Negative projections this sale would leave. The check nets the Lines
+// The products this sale would leave Oversold. The check nets the Lines
 // per product in Base units. Two Lines of one product therefore give one
 // judgement, whether they name the same Unit or different Units.
-// A Negative projection warns. It never blocks the save. The customer waits
+// An Oversold warns. It never blocks the save. The customer waits
 // at the counter with the goods. A refused write costs the shop an
 // unrecorded sale and a wrong Utang balance.
 ```
 
 Six lines before, six after. The register changed; the length did not, because the
-length was never the problem. Note the vocabulary: "below zero" becomes Negative
-projection, and `utang` becomes the Technical Name Utang.
+length was never the problem. The vocabulary changed throughout. `utang` becomes the
+Technical Name Utang, `lines` becomes Lines, and "different ones" becomes different
+Units. "Below zero" becomes Oversold, and not Negative projection: this
+code path saves a Sale, and the glossary keeps the narrower term for exactly that cause.
+Reach for the narrower term whenever the code sits on the narrow case.
 
 ### A restated expression compresses; the reason stays
 
@@ -219,8 +224,8 @@ and Ledger take their glossary spelling.
 
 ### A bare file that has something to say
 
-`src/lib/auth.ts` carries no comments today. It is one of the few bare files where
-something non-derivable goes unsaid.
+`src/lib/auth.ts` carried no comments before the sweep. It was one of the few bare files
+where something non-derivable went unsaid. The JSDoc below is what the file carries now.
 
 After:
 
