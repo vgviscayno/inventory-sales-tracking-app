@@ -69,8 +69,8 @@ export const create = mutation({
     // One flag covers the whole Sale, and not one Line. It records that a
     // person saw the warning and agreed, and there is one such gesture per
     // save.
-    // The client computes the Negative projection warning, because a mutation
-    // cannot ask mid-flight. This flag is therefore the backstop. It stops a
+    // The client computes the Oversold warning, because a mutation cannot ask
+    // mid-flight. This flag is therefore the backstop. It stops a
     // script, or a surface that forgot to warn, from driving stock negative
     // with nobody looking.
     allowNegative: v.optional(v.boolean()),

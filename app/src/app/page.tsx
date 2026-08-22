@@ -48,7 +48,7 @@ export default function RegisterPage() {
   const [customerId, setCustomerId] = useState<Id<"customers"> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // Whether the person has seen the Negative projection warning yet. The click
+  // Whether the person has seen the Oversold warning yet. The click
   // that sets this flag is the warning, and the next click is the consent.
   // A change to the cart clears the flag, so consent never carries over to a
   // Sale nobody has seen.
@@ -110,10 +110,10 @@ export default function RegisterPage() {
     (sum, l) => sum + roundCentavos(l.unit.price * l.quantity),
     0,
   );
-  // The Negative projections this sale would leave. The check nets the Lines
+  // The products this sale would leave Oversold. The check nets the Lines
   // per product in Base units. Two Lines of one product therefore give one
   // judgement, whether they name the same Unit or different Units.
-  // A Negative projection warns. It never blocks the save. The customer waits
+  // An Oversold warns. It never blocks the save. The customer waits
   // at the counter with the goods. A refused write costs the shop an
   // unrecorded sale and a wrong Utang balance.
   const oversold = findOversold(
@@ -406,9 +406,9 @@ export default function RegisterPage() {
             {error && <p className="text-danger text-sm">{error}</p>}
 
             {/* This block shows only when the client's own counts show the
-                Negative projection. On the server-refusal path `oversold` is
-                empty, and the error above is the warning. To claim a Negative
-                projection the counts do not show would be a lie. */}
+                Oversold. On the server-refusal path `oversold` is empty, and
+                the error above is the warning. To claim an Oversold the counts
+                do not show would be a lie. */}
             {warned && oversold.length > 0 && (
               <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
                 <p className="font-semibold text-danger">
