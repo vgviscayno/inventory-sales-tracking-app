@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { roundCentavos } from "../../convex/money";
-import { findOversold } from "../../convex/oversold";
+import { findNegativeProjections } from "../../convex/negativeProjections";
 import { formatStock } from "../../convex/remainderReading";
 import { unitLabelFor } from "../../convex/unitLabels";
 import { CustomerPicker } from "./CustomerPicker";
@@ -116,7 +116,7 @@ export default function RegisterPage() {
   // An Oversold warns. It never blocks the save. The customer waits
   // at the counter with the goods. A refused write costs the shop an
   // unrecorded sale and a wrong Utang balance.
-  const oversold = findOversold(
+  const oversold = findNegativeProjections(
     lines.map((l) => ({
       productId: l.productId,
       delta: -Math.round(l.quantity * l.unit.baseEquivalent),

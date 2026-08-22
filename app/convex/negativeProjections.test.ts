@@ -1,16 +1,16 @@
 import { describe, expect, test } from "vitest";
-import { findOversold } from "./oversold";
+import { findNegativeProjections } from "./negativeProjections";
 
-describe("findOversold", () => {
-  test("the empty case: no lines means no oversold products", () => {
+describe("findNegativeProjections", () => {
+  test("the empty case: no lines means no negative projections", () => {
     expect(
-      findOversold([], [{ productId: "eggs", quantityOnHand: 60 }]),
+      findNegativeProjections([], [{ productId: "eggs", quantityOnHand: 60 }]),
     ).toEqual([]);
   });
 
   test("two lines of one product summing past stock", () => {
     expect(
-      findOversold(
+      findNegativeProjections(
         [
           { productId: "eggs", delta: -40 },
           { productId: "eggs", delta: -25 },
@@ -22,7 +22,7 @@ describe("findOversold", () => {
 
   test("two lines individually over but netted fine", () => {
     expect(
-      findOversold(
+      findNegativeProjections(
         [
           { productId: "eggs", delta: -15 },
           { productId: "eggs", delta: 10 },
@@ -32,9 +32,9 @@ describe("findOversold", () => {
     ).toEqual([]);
   });
 
-  test("several products in one call, only the oversold ones come back", () => {
+  test("several products in one call, only the negative projections come back", () => {
     expect(
-      findOversold(
+      findNegativeProjections(
         [
           { productId: "eggs", delta: -5 },
           { productId: "milk", delta: -20 },
@@ -50,6 +50,8 @@ describe("findOversold", () => {
   });
 
   test("a product with no matching count is skipped, not treated as zero", () => {
-    expect(findOversold([{ productId: "deleted", delta: -5 }], [])).toEqual([]);
+    expect(
+      findNegativeProjections([{ productId: "deleted", delta: -5 }], []),
+    ).toEqual([]);
   });
 });

@@ -16,7 +16,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { findOversold } from "../../../convex/oversold";
+import { findNegativeProjections } from "../../../convex/negativeProjections";
 import { formatStock } from "../../../convex/remainderReading";
 import { formatCount } from "../../../convex/unitLabels";
 import { SupplierPicker } from "../SupplierPicker";
@@ -297,18 +297,19 @@ export function DeliverySheet({
     quantityOnHand: p.quantityOnHand,
   }));
 
-  const oversold = findOversold(deltaLines, productCounts).flatMap(
-    ({ productId, projected }) => {
-      const product = allProducts.find((p) => p._id === productId);
-      return product ? [{ productId, product, projected }] : [];
-    },
-  );
+  const negativeProjections = findNegativeProjections(
+    deltaLines,
+    productCounts,
+  ).flatMap(({ productId, projected }) => {
+    const product = allProducts.find((p) => p._id === productId);
+    return product ? [{ productId, product, projected }] : [];
+  });
 
   // What a delete of the whole Entry, through the Delete button, does to each
   // product. The reckoning comes from the Entry as it stands on the Ledger, and
   // not from an unsaved edit in `lines`. A delete discards those edits with the
   // Entry, so the warning must describe the Entry that actually goes.
-  const deleteOversold = findOversold(
+  const deleteNegativeProjections = findNegativeProjections(
     (existingEntry?.lines ?? []).map((l) => ({
       productId: l.productId,
       delta: -l.baseAmount,
@@ -368,7 +369,7 @@ export function DeliverySheet({
       return;
     }
 
-    if (oversold.length > 0 && !warned) {
+    if (negativeProjections.length > 0 && !warned) {
       setWarned(true);
       return;
     }
@@ -653,15 +654,17 @@ export function DeliverySheet({
             <p className="font-semibold text-danger">
               Removing the last line deletes this entry
             </p>
-            {oversold.length > 0 && (
+            {negativeProjections.length > 0 && (
               <ul className="mt-1 space-y-0.5 text-[13px]">
-                {oversold.map(({ productId, product, projected }) => (
-                  <li key={productId}>
-                    <span className="font-semibold">{product.name}</span> —
-                    currently {formatStock(product)}, deleting leaves{" "}
-                    {formatStock({ ...product, quantityOnHand: projected })}
-                  </li>
-                ))}
+                {negativeProjections.map(
+                  ({ productId, product, projected }) => (
+                    <li key={productId}>
+                      <span className="font-semibold">{product.name}</span> —
+                      currently {formatStock(product)}, deleting leaves{" "}
+                      {formatStock({ ...product, quantityOnHand: projected })}
+                    </li>
+                  ),
+                )}
               </ul>
             )}
             <p className="mt-1.5 text-sub text-[13px]">
@@ -671,15 +674,15 @@ export function DeliverySheet({
         )}
 
         {/* Only when the client's own counts show the overdraw — on the
-            server-refusal path `oversold` is empty and the error above is
+            server-refusal path `negativeProjections` is empty and the error above is
             the warning. */}
-        {warned && oversold.length > 0 && !isDeleteViaEmptySave && (
+        {warned && negativeProjections.length > 0 && !isDeleteViaEmptySave && (
           <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
             <p className="font-semibold text-danger">
               This will take stock below zero
             </p>
             <ul className="mt-1 space-y-0.5 text-[13px]">
-              {oversold.map(({ productId, product, projected }) => (
+              {negativeProjections.map(({ productId, product, projected }) => (
                 <li key={productId}>
                   <span className="font-semibold">{product.name}</span> —
                   currently {formatStock(product)}, this edit leaves{" "}
@@ -743,20 +746,22 @@ export function DeliverySheet({
                     : "Delete Entry"}
               </button>
             </div>
-            {confirmingDelete && deleteOversold.length > 0 && (
+            {confirmingDelete && deleteNegativeProjections.length > 0 && (
               <div className="mt-2 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
                 <p className="font-semibold text-danger">
                   This will take stock below zero
                 </p>
                 <ul className="mt-1 space-y-0.5 text-[13px]">
-                  {deleteOversold.map(({ productId, product, projected }) => (
-                    <li key={productId}>
-                      <span className="font-semibold">{product.name}</span> —
-                      currently {formatStock(product)}, deleting this entry
-                      leaves{" "}
-                      {formatStock({ ...product, quantityOnHand: projected })}
-                    </li>
-                  ))}
+                  {deleteNegativeProjections.map(
+                    ({ productId, product, projected }) => (
+                      <li key={productId}>
+                        <span className="font-semibold">{product.name}</span> —
+                        currently {formatStock(product)}, deleting this entry
+                        leaves{" "}
+                        {formatStock({ ...product, quantityOnHand: projected })}
+                      </li>
+                    ),
+                  )}
                 </ul>
               </div>
             )}

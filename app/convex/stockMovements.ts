@@ -7,7 +7,7 @@ import {
   query,
 } from "./_generated/server";
 import { roundCentavos } from "./money";
-import { findOversold } from "./oversold";
+import { findNegativeProjections } from "./negativeProjections";
 import { findUnit, resolveDefaultUnitLabel } from "./products";
 
 // The fixed reason set for a Pull-out. It lives here and not in pullouts.ts,
@@ -462,13 +462,13 @@ export const editEntry = mutation({
       for (const productId of touchedProductIds) {
         const product = await ctx.db.get(productId);
         if (!product) throw new Error("Product not found");
-        const oversold = findOversold(
+        const negativeProjections = findNegativeProjections(
           deltaLines.filter((l) => l.productId === productId),
           [{ productId: product._id, quantityOnHand: product.quantityOnHand }],
         );
-        if (oversold.length > 0) {
+        if (negativeProjections.length > 0) {
           throw new Error(
-            `This edit would leave "${product.name}" at ${oversold[0].projected}. ` +
+            `This edit would leave "${product.name}" at ${negativeProjections[0].projected}. ` +
               `Confirm the count is wrong and record it anyway to proceed.`,
           );
         }
@@ -597,13 +597,13 @@ export const deleteEntry = mutation({
       for (const productId of touchedProductIds) {
         const product = await ctx.db.get(productId);
         if (!product) throw new Error("Product not found");
-        const oversold = findOversold(
+        const negativeProjections = findNegativeProjections(
           deltaLines.filter((l) => l.productId === productId),
           [{ productId: product._id, quantityOnHand: product.quantityOnHand }],
         );
-        if (oversold.length > 0) {
+        if (negativeProjections.length > 0) {
           throw new Error(
-            `Deleting this entry would leave "${product.name}" at ${oversold[0].projected}. ` +
+            `Deleting this entry would leave "${product.name}" at ${negativeProjections[0].projected}. ` +
               `Confirm the count is wrong and delete it anyway to proceed.`,
           );
         }

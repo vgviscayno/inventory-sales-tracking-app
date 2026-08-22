@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { findOversold } from "./oversold";
+import { findNegativeProjections } from "./negativeProjections";
 import { findUnit, resolveDefaultUnitLabel } from "./products";
 import { entryLines, reasonCategory, recordMovement } from "./stockMovements";
 
@@ -56,7 +56,7 @@ export const create = mutation({
       // The check sums per product, so two Lines of one product give one
       // judgement. The two Lines may name different Units. The judgement is on
       // what the Pull-out takes, and not on each Line alone.
-      const oversold = findOversold(
+      const negativeProjections = findNegativeProjections(
         resolvedLines.map(({ line, baseAmount }) => ({
           productId: line.productId,
           delta: -baseAmount,
@@ -66,7 +66,7 @@ export const create = mutation({
           quantityOnHand: product.quantityOnHand,
         })),
       );
-      for (const { productId, projected } of oversold) {
+      for (const { productId, projected } of negativeProjections) {
         const name = resolvedLines.find(
           ({ line }) => line.productId === productId,
         )?.product.name;

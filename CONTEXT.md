@@ -77,7 +77,7 @@ A product that a pending save would leave below zero, judged on the Entry's whol
 _Avoid_: negative stock (names the resulting state, not the check), insufficient stock (implies a refusal), stock-out; oversold, where the cause is not a Sale
 
 **Oversold**:
-A Negative projection caused by a Sale — more of a product rung up than the count says is on the shelf. The narrower of the two terms: a Pull-out, or an edit to a Delivery, can produce a Negative projection with nothing having been sold at all. The code currently uses `oversold` for the general case (`convex/oversold.ts` and the `oversold` locals in `DeliverySheet` and `PulloutSheet`); by this glossary those name Negative projections and are due a rename.
+A Negative projection caused by a Sale — more of a product rung up than the count says is on the shelf. The narrower of the two terms: a Pull-out, or an edit to a Delivery, can produce a Negative projection with nothing having been sold at all.
 _Avoid_: Negative projection where a Sale is specifically meant (Oversold is the more precise term), overdrawn, short
 
 **Archive**:

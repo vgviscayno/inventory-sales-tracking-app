@@ -21,7 +21,7 @@
  * product. A zero here would turn "unknown" into a false warning.
  */
 
-export type OversoldLine<ProductId> = {
+export type ProjectionLine<ProductId> = {
   productId: ProductId;
   delta: number;
 };
@@ -31,16 +31,16 @@ export type ProductCount<ProductId> = {
   quantityOnHand: number;
 };
 
-export type Oversold<ProductId> = {
+export type NegativeProjection<ProductId> = {
   productId: ProductId;
   quantityOnHand: number;
   projected: number;
 };
 
-export function findOversold<ProductId>(
-  lines: OversoldLine<ProductId>[],
+export function findNegativeProjections<ProductId>(
+  lines: ProjectionLine<ProductId>[],
   products: ProductCount<ProductId>[],
-): Oversold<ProductId>[] {
+): NegativeProjection<ProductId>[] {
   const netDeltaByProduct = new Map<ProductId, number>();
   for (const line of lines) {
     netDeltaByProduct.set(
@@ -53,7 +53,7 @@ export function findOversold<ProductId>(
     products.map((p) => [p.productId, p.quantityOnHand]),
   );
 
-  const result: Oversold<ProductId>[] = [];
+  const result: NegativeProjection<ProductId>[] = [];
   for (const [productId, delta] of netDeltaByProduct) {
     const quantityOnHand = countByProduct.get(productId);
     if (quantityOnHand === undefined) continue;

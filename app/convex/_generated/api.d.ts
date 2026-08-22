@@ -12,7 +12,7 @@ import type * as customers from "../customers.js";
 import type * as deliveries from "../deliveries.js";
 import type * as lifecycle from "../lifecycle.js";
 import type * as money from "../money.js";
-import type * as oversold from "../oversold.js";
+import type * as negativeProjections from "../negativeProjections.js";
 import type * as payments from "../payments.js";
 import type * as products from "../products.js";
 import type * as pullouts from "../pullouts.js";
@@ -33,7 +33,7 @@ declare const fullApi: ApiFromModules<{
   deliveries: typeof deliveries;
   lifecycle: typeof lifecycle;
   money: typeof money;
-  oversold: typeof oversold;
+  negativeProjections: typeof negativeProjections;
   payments: typeof payments;
   products: typeof products;
   pullouts: typeof pullouts;
