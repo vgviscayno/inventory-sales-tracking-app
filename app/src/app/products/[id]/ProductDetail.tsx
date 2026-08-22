@@ -17,6 +17,7 @@ import { PulloutSheet } from "../../movements/PulloutSheet";
 import { SaleEntrySheet } from "../../movements/SaleEntrySheet";
 import { StockStatusPill } from "../../StockStatusPill";
 import { WindowedDayList } from "../../WindowedDayList";
+import { ReadingLadderField } from "../ReadingLadderField";
 
 // Derived from the query rather than restated, so a new field — or a new stock
 // status — reaches this form without anyone remembering to widen a type here.
@@ -437,30 +438,18 @@ function ProductForm({ product }: { product: Product }) {
             }
             onReset={() => setDenominationLabels(savedDenominationLabels)}
           >
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-              {denominations.map((unit) => (
-                <label
-                  key={unit.label}
-                  className="flex items-center gap-1.5 text-[13px]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={denominationLabels.includes(unit.label)}
-                    onChange={(e) =>
-                      toggleDenomination(unit.label, e.target.checked)
-                    }
-                  />
-                  <span>{unit.label}</span>
-                </label>
-              ))}
-            </div>
-            <p className="text-sub mt-1.5 text-[12px]">
-              {/* The Base unit is never a checkbox: it is on every ladder
-                  whether or not it was chosen, because it is the only denomination
-                  fine enough to hold what the coarser ones leave behind. */}
-              Always ends in {baseUnitTrimmed}. Reads
-              {product.quantityOnHand > 0 ? " " : " e.g. "}"{readingPreview}".
-            </p>
+            {/* Saved Units, so a label is settled enough to key a tick by. */}
+            <ReadingLadderField
+              items={denominations.map((unit) => ({
+                key: unit.label,
+                label: unit.label,
+                checked: denominationLabels.includes(unit.label),
+              }))}
+              baseUnitLabel={baseUnitTrimmed}
+              preview={readingPreview}
+              previewIsExample={product.quantityOnHand <= 0}
+              onToggle={toggleDenomination}
+            />
           </DiffField>
         )}
         {isArchived ? (

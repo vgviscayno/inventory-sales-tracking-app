@@ -91,11 +91,16 @@ function resolveBaseUnit({
  * Deliberately *not* deduped by Base equivalent, unlike the ladder itself: two
  * same-sized Units are two real Units and both are tickable. Which of them
  * wins is the reading's call, and the form previews the result.
+ *
+ * Generic over the row, and hands back the very rows it was given rather than
+ * copies: the add-product form tracks its ticks by draft-row key rather than
+ * by label, since a label being typed can be blank or briefly duplicated, and
+ * it needs those keys to survive the trip.
  */
-export function selectableDenominations(product: {
-  units: Unit[];
+export function selectableDenominations<T extends Unit>(product: {
+  units: T[];
   baseUnitLabel: string;
-}): Unit[] {
+}): T[] {
   const baseUnit = resolveBaseUnit(product);
   return product.units
     .filter(
