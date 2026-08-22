@@ -35,8 +35,9 @@ test("a sale in a non-Base Unit moves stock by the derived Base amount and price
 
 test("each sale line rounds to centavos before the total is summed", async () => {
   const t = setupTest();
-  // A price and quantity chosen so the raw product carries float noise
-  // (0.1 * 3 !== 0.3 in floating point) that has to be rounded away per line.
+  // The price and the Unit quantity here make the raw multiplication carry
+  // float noise. `0.1 * 3` is not `0.3` in floating point. The rounding clears
+  // that noise per Line.
   const rice = await aProductHolding(t, 5000, {
     name: "Rice",
     units: [{ label: "g", baseEquivalent: 1, price: 0.1 }],
@@ -98,10 +99,10 @@ test("a sale carrying one product on two lines in two Units lands as two rows an
   await expectCacheMatchesLedger(t, eggs);
 });
 
-// A sale mixing Units is exactly the case "every fold over the ledger becomes
-// a fold over derived Base amounts" exists to protect: summing the raw,
-// per-line Unit-quantities (-1 tray + -5 pieces = -6) would badly understate
-// what actually left the shelf (-35 pieces).
+// A Sale that mixes Units is the case the derived Base amount exists to
+// protect. Every fold over the Ledger folds over derived Base amounts.
+// A sum of the raw per-Line Unit quantities gives -1 tray plus -5 pieces, which
+// is -6. That badly understates the -35 pieces that left the shelf.
 test("a mixed-Unit sale's netChange is folded in Base amounts, not summed across Unit-quantities", async () => {
   const t = setupTest();
   const eggs = await aProductHolding(t, 100, {
@@ -130,8 +131,8 @@ test("the below-zero warning judges all of a product's lines together, across Un
     baseUnitLabel: "piece",
   });
 
-  // 2 trays (60) + 5 pieces (5) = 65 against 60 on hand: oversold, even
-  // though neither line alone would read that way.
+  // 2 trays (60) plus 5 pieces (5) is 65, against 60 on hand. The Sale is
+  // therefore Oversold, though neither Line alone reads that way.
   await expect(
     t.mutation(api.sales.create, {
       paymentMethod: "cash",
@@ -175,8 +176,9 @@ test("repeated decimal-Unit writes and reads accumulate no float drift in quanti
     });
   }
 
-  // Each of the 5 sales rounds to exactly 1700g on write, so the cache is an
-  // exact integer, not `5000 - 5 * 1.7 * 1000` accumulated as float noise.
+  // Each of the 5 Sales rounds to exactly 1700g on write, so the cache holds an
+  // exact integer. It does not accumulate `5000 - 5 * 1.7 * 1000` as float
+  // noise.
   expect(await t.query(api.products.get, { id: rice })).toMatchObject({
     quantityOnHand: -3500, // 5000 - 5 * 1700
   });
@@ -285,6 +287,6 @@ test("changing a Unit's Base equivalent does not change what past movements came
   const ledger = await t.query(api.stockMovements.listForProduct, {
     productId: eggs,
   });
-  // The already-recorded tray sale still reads as -30 pieces, not -12.
+  // The earlier Sale still reads as -30 pieces, and not as -12.
   expect(ledger[0]).toMatchObject({ netChange: -30 });
 });

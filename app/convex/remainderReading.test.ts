@@ -6,9 +6,9 @@ import {
   readQuantity,
 } from "./remainderReading";
 
-// Eggs: a nesting ladder — a case is twelve trays is 360 pieces. Labels are
-// singular, as CONTEXT.md's "Unit" has them; the reading inflects each one
-// to agree with its own count.
+// Eggs sit on a nesting ladder. A case is twelve trays, and it is 360 pieces.
+// The labels are singular, the way "Unit" in CONTEXT.md has them. The reading
+// inflects each label to agree with its own count.
 const EGGS = {
   units: [
     { label: "pc", baseEquivalent: 1 },
@@ -18,7 +18,8 @@ const EGGS = {
   baseUnitLabel: "pc",
 };
 
-// Onions: denominations that don't divide into each other — a sack is 8⅓ bundles.
+// Onions sit on Denominations that do not divide into each other. A sack is
+// 8⅓ bundles.
 const ONIONS = {
   units: [
     { label: "pc", baseEquivalent: 1 },
@@ -28,7 +29,8 @@ const ONIONS = {
   baseUnitLabel: "pc",
 };
 
-// Rice: a very fine Base unit, used for the ladder that omits it.
+// Rice sits on a very fine Base unit. The ladder that omits the Base unit uses
+// this product.
 const RICE = {
   units: [
     { label: "g", baseEquivalent: 1 },
@@ -139,7 +141,8 @@ describe("readQuantity", () => {
       { count: 3, unitLabel: "bundle" },
       { count: 1, unitLabel: "pc" },
     ]);
-    // The whole point of permitting them: the terms add back to the figure.
+    // This is the whole point of permitting them. The terms add back to the
+    // figure.
     expect(
       4 * 100 + 3 * 12 + 1, // sack, bundle, pc
     ).toBe(437);

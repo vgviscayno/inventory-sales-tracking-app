@@ -22,7 +22,7 @@ test("a mixed cash and utang history, less a payment, is the customer's balance"
     paymentMethod: "utang",
     items: [{ productId: coke, unitLabel: "pc", quantity: 3 }],
   });
-  // Paid in cash — owed nothing, so it must not reach the balance
+  // Paid in cash, so this Sale owes nothing. It must not reach the balance.
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "cash",
@@ -196,8 +196,8 @@ test("deleting an archived customer who owes money is refused, naming the amount
   ).toBe(undefined);
 });
 
-// An overpayment is still money — it blocks deletion exactly like a debt
-// does, not just a positive balance.
+// An overpayment is still money. The gate blocks the delete on it, and not on
+// a positive balance alone.
 test("deleting an archived customer who is owed money (an overpayment) is refused", async () => {
   const t = setupTest();
   const customerId = await aCustomer(t, "Nita");
@@ -217,8 +217,7 @@ test("deleting an archived customer who is owed money (an overpayment) is refuse
   ).toBe(undefined);
 });
 
-// History alone never traps a row on her list forever — only the balance
-// does.
+// History alone never traps a row on the list forever. Only the balance does.
 test("a settled customer with a long sale and payment history deletes successfully", async () => {
   const t = setupTest();
   const customerId = await aCustomer(t, "Longtime Regular");

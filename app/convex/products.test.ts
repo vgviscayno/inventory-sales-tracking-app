@@ -63,8 +63,8 @@ test("a count at or under the threshold reads as low", async () => {
   });
 });
 
-// A negative count is also `<= threshold`, so the two cases overlap and the
-// order they are checked in decides which one a shopkeeper sees. "Recount this"
+// A negative count is also `<= threshold`, so the two cases overlap. The order
+// the code checks them in decides which one a shopkeeper sees. "Recount this"
 // must never render as "order more".
 test("a negative count reads as negative, not merely low", async () => {
   const t = setupTest();
@@ -171,9 +171,9 @@ test("deleting an archived product still holding stock is refused, regardless of
   expect((await t.query(api.products.get, { id }))?.deletedAt).toBe(undefined);
 });
 
-// A deleted-while-negative product would be an unreconcilable cache row with
-// no UI left to repair it — the gate treats negative the same as any other
-// non-zero count, not as an exception.
+// A product deleted while negative leaves a cache row nobody can reconcile,
+// and no screen to repair it. The gate therefore treats a negative count the
+// same as any other non-zero count, and not as an exception.
 test("deleting an archived product with a negative count is refused", async () => {
   const t = setupTest();
   const id = await aProductHolding(t, 2);
@@ -205,10 +205,11 @@ test("deleting a product touches neither its cached count nor the ledger, and it
   expect(sale.lines).toMatchObject([{ productName: "Ghost SKU" }]);
 });
 
-// The rough edge the ticket calls out: a typo product born from "+ Add as new
-// product" arrives with stock, because the delivery line that created it put
-// units on it. Cleanup composes — drop the line, the ghost falls to 0,
-// archive, delete.
+// The rough edge the ticket calls out. A typo product born from "+ Add as new
+// product" arrives with stock. The Delivery Line that created it put Units on
+// it.
+// The cleanup composes. Drop the Line, and the ghost falls to 0. Then archive
+// it, then delete it.
 test("the ghost-product cleanup path: a mis-typed inline delivery product is dropped from its entry, falls to 0, archives, and deletes", async () => {
   const t = setupTest();
   const realId = await aProductHolding(t, 0, { name: "Coke 1.5L" });
@@ -234,8 +235,8 @@ test("the ghost-product cleanup path: a mis-typed inline delivery product is dro
   if (!ghostLine || !realLine) throw new Error("Expected line not found");
   const ghostId = ghostLine.productId;
 
-  // Reopen the entry and drop the ghost's line, re-pointing nothing since the
-  // real product's own line already covers the delivered stock.
+  // Reopen the Entry and drop the ghost's Line. Nothing re-points, because the
+  // real product's own Line already covers the delivered stock.
   await t.mutation(api.stockMovements.editEntry, {
     entry: { type: "delivery", entryId: deliveryId },
     lines: [
@@ -373,7 +374,8 @@ test("correcting a Unit's price leaves past sales at the price they were rung up
     items: [{ productId: eggs, unitLabel: "tray", quantity: 2 }],
   });
 
-  // The tray goes up from ₱220 to ₱250 — a price rise, not a migration.
+  // The tray goes up from ₱220 to ₱250. That is a price rise, and not a
+  // migration.
   await t.mutation(api.products.update, {
     id: eggs,
     units: [
@@ -385,8 +387,8 @@ test("correcting a Unit's price leaves past sales at the price they were rung up
   expect((await t.query(api.products.get, { id: eggs }))?.units).toContainEqual(
     { label: "tray", baseEquivalent: 30, price: 250 },
   );
-  // The sale already rung up holds its ₱440 — priced off the snapshot, not the
-  // Unit's live price.
+  // The earlier Sale holds its ₱440. It prices off the snapshot, and not off
+  // the Unit's live price.
   const [sale] = await t.query(api.sales.list, {});
   expect(sale.totalAmount).toBe(440);
 });
@@ -415,8 +417,8 @@ test("correcting a Unit's Base equivalent does not resize past movements — the
   const ledger = await t.query(api.stockMovements.listForProduct, {
     productId: eggs,
   });
-  // The already-recorded tray sale still reads as -30 pieces, not -12, and the
-  // cache is untouched by the correction.
+  // The earlier tray Sale still reads as -30 pieces, and not as -12. The
+  // correction leaves the cache untouched.
   expect(ledger[0]).toMatchObject({ unitLabel: "tray", netChange: -30 });
   expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
     quantityOnHand: 30,
@@ -436,7 +438,7 @@ test("a Unit can be added to a product that already has history", async () => {
     items: [{ productId: eggs, unitLabel: "piece", quantity: 5 }],
   });
 
-  // She starts selling eggs by the tray without needing a new product.
+  // The shop starts selling eggs by the tray, and needs no new product.
   await t.mutation(api.products.update, {
     id: eggs,
     units: EGGS_UNITS,
@@ -445,7 +447,7 @@ test("a Unit can be added to a product that already has history", async () => {
   expect((await t.query(api.products.get, { id: eggs }))?.units).toHaveLength(
     2,
   );
-  // And the new Unit is immediately usable.
+  // The new Unit is usable at once.
   await t.mutation(api.sales.create, {
     paymentMethod: "cash",
     items: [{ productId: eggs, unitLabel: "tray", quantity: 1 }],
@@ -479,8 +481,8 @@ test("a non-Base Unit can be removed, and movements recorded under it still read
   const ledger = await t.query(api.stockMovements.listForProduct, {
     productId: eggs,
   });
-  // The tray sale keeps reading as a tray, off its snapshot, though the Unit is
-  // gone from the product.
+  // The tray Sale keeps reading as a tray, off its snapshot. The Unit is gone
+  // from the product.
   expect(ledger[0]).toMatchObject({ unitLabel: "tray", netChange: -30 });
   await expectCacheMatchesLedger(t, eggs);
 });
@@ -526,8 +528,8 @@ test("removing the Base unit is refused", async () => {
 
 test("reassigning the Base unit succeeds while the product has no movements", async () => {
   const t = setupTest();
-  // Created based in kilos, no stock logged yet — the wrong-Base-unit fix is
-  // free until the first movement.
+  // The test creates the product based in kilos, and logs no stock yet. The fix
+  // for a wrong Base unit is free until the first Movement.
   const rice = await aProductHolding(t, 0, {
     name: "Rice",
     units: [{ label: "kg", baseEquivalent: 1, price: 75 }],
@@ -550,7 +552,7 @@ test("reassigning the Base unit succeeds while the product has no movements", as
 
 test("reassigning the Base unit is refused once the product has movements, with a message pointing at archiving and recreating", async () => {
   const t = setupTest();
-  // A delivery has been logged, so a movement exists.
+  // The test logs a Delivery, so a Movement exists.
   const rice = await aProductHolding(t, 50, {
     name: "Rice",
     units: [{ label: "kg", baseEquivalent: 1, price: 75 }],
@@ -568,7 +570,7 @@ test("reassigning the Base unit is refused once the product has movements, with 
     }),
   ).rejects.toThrow(/locked[\s\S]*archive|archive[\s\S]*recreat/i);
 
-  // Nothing changed — the Base unit is still what it was.
+  // Nothing changed. The Base unit is still what it was.
   expect(await t.query(api.products.get, { id: rice })).toMatchObject({
     baseUnitLabel: "kg",
   });
@@ -612,8 +614,9 @@ test("the Reading ladder round-trips, and an unticked box clears it", async () =
     denominationLabels: ["tray"],
   });
 
-  // An empty array is the clear — it already means "read plainly", so the
-  // ladder needs no separate null the way the threshold and Default unit do.
+  // An empty array is the clear, because it already means the plain reading.
+  // The ladder therefore needs no separate `null`, the way the threshold and
+  // the Default unit do.
   await t.mutation(api.products.update, { id: eggs, denominationLabels: [] });
   expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
     denominationLabels: [],
@@ -633,8 +636,8 @@ test("a ladder set on a product reaches the delete gate's message", async () => 
   });
   await t.mutation(api.products.archive, { id: eggs });
 
-  // The gate speaks the same denomination every other surface does, rather
-  // than the raw Base-unit figure — 305 pieces.
+  // The gate speaks the same Denomination every other surface does. It does not
+  // speak the raw Base-unit figure of 305 pieces.
   await expect(t.mutation(api.products.remove, { id: eggs })).rejects.toThrow(
     "10 trays, 5 pieces still on hand",
   );
@@ -651,8 +654,8 @@ test("a ladder naming a Unit that has since been removed degrades to the plain r
     id: eggs,
     denominationLabels: ["tray"],
   });
-  // The tray goes; the stored ladder still names it. Reading it must not be
-  // what breaks the screen — see `buildReadingLadder`.
+  // The tray goes, and the stored ladder still names it. The reading must not
+  // be what breaks the screen. See `buildReadingLadder`.
   await t.mutation(api.products.update, {
     id: eggs,
     units: [{ label: "piece", baseEquivalent: 1, price: 8 }],

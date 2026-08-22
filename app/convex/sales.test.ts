@@ -133,7 +133,7 @@ test("allowNegative records the sale and lands the negative count", async () => 
   const customerId = await aCustomer(t);
   const coke = await aProductHolding(t, 2, { sellingPrice: 75 });
 
-  // One flag for the whole call — one confirm gesture, one save.
+  // One flag covers the whole call. There is one confirm gesture, and one save.
   await t.mutation(api.sales.create, {
     customerId,
     paymentMethod: "utang",
@@ -221,10 +221,10 @@ test("a sale charges the price at the time, not the price today", async () => {
     paymentMethod: "utang",
     items: [{ productId: coke, unitLabel: "pc", quantity: 2 }],
   });
-  // A Unit's price isn't editable through the public API yet (that lands with
-  // Unit correction — see docs/adr/0004-base-unit-locked.md's neighboring
-  // ticket), so the only way to simulate "the price changed since" today is
-  // to reach under it, the same way the cache-drift test does.
+  // The Sale's total comes from the price its row snapshotted, and not from the
+  // Unit's live price. This patch moves the live price to prove that.
+  // A `products.update` call would move it the same way today. A correction to
+  // a Unit's price is an ordinary edit now.
   await t.run(async (ctx) => {
     await ctx.db.patch(coke, {
       units: [{ label: "pc", baseEquivalent: 1, price: 90 }],

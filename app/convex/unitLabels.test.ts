@@ -12,17 +12,18 @@ describe("formatCount", () => {
     expect(formatCount(305, "tray")).toBe("305 trays");
   });
 
-  // Base equivalent's entry in CONTEXT.md permits decimal quantities where the
-  // store genuinely sells that way, so these are reachable — and a negative
-  // count is the ledger disagreeing with the shelf, which still has to read.
+  // "Base equivalent" in CONTEXT.md permits a decimal Unit quantity where the
+  // shop genuinely sells that way. These counts are therefore reachable.
+  // A negative count is the Ledger disagreeing with the shelf, and it still has
+  // to read.
   test("fractions and negatives read plural", () => {
     expect(formatCount(0.5, "tray")).toBe("0.5 trays");
     expect(formatCount(1.5, "tray")).toBe("1.5 trays");
     expect(formatCount(-3, "tray")).toBe("-3 trays");
   });
 
-  // A movement sheet renders a sale as a signed quantity, so one tray leaving
-  // arrives here as -1. That is still one tray.
+  // A movement sheet renders a Sale as a signed Unit quantity, so one tray
+  // leaving arrives here as -1. That is still one tray.
   test("a signed count inflects on its magnitude", () => {
     expect(formatCount(-1, "tray")).toBe("-1 tray");
     expect(formatCount(-2, "tray")).toBe("-2 trays");
@@ -36,7 +37,8 @@ describe("formatCount", () => {
 });
 
 describe("uncountable labels", () => {
-  // Units of measure are abbreviations, not English nouns — "2 kgs" is wrong.
+  // A unit of measure is an abbreviation and not an English noun. "2 kgs" is
+  // wrong.
   test("measure abbreviations never take an s", () => {
     expect(formatCount(2, "kg")).toBe("2 kg");
     expect(formatCount(500, "g")).toBe("500 g");
@@ -44,7 +46,8 @@ describe("uncountable labels", () => {
     expect(formatCount(1, "kg")).toBe("1 kg");
   });
 
-  // Tagalog nouns do not inflect for number at all: "3 sako", never "3 sakos".
+  // A Tagalog noun does not inflect for number at all. It reads "3 sako", and
+  // never "3 sakos".
   test("Tagalog labels never take an s", () => {
     expect(formatCount(3, "sako")).toBe("3 sako");
     expect(formatCount(3, "kaha")).toBe("3 kaha");
@@ -59,9 +62,9 @@ describe("uncountable labels", () => {
 });
 
 describe("labels that predate this module", () => {
-  // Nothing ever asked her for the singular, so a label typed plural is
-  // ordinary existing data. `pluralize` inflects both ways, which is what lets
-  // the plural be derived rather than stored and migrated.
+  // Nothing ever asks for the singular, so a label typed plural is ordinary
+  // existing data. `pluralize` inflects both ways, which is what lets the app
+  // derive the plural instead of storing and migrating it.
   test("a label typed plural still reads singular at one", () => {
     expect(formatCount(1, "trays")).toBe("1 tray");
     expect(formatCount(1, "boxes")).toBe("1 box");
@@ -69,8 +72,9 @@ describe("labels that predate this module", () => {
   });
 
   test("'pcs' is rewritten to 'pc' at a count of one", () => {
-    // Accepted deliberately: deriving the plural means the app owns the
-    // wording, and "1 pc" is correct English even though she typed "pcs".
+    // This repo accepts the change deliberately. To derive the plural is to
+    // give the app the wording. "1 pc" is correct English even where somebody
+    // typed "pcs".
     expect(formatCount(1, "pcs")).toBe("1 pc");
     expect(formatCount(3, "pcs")).toBe("3 pcs");
   });
@@ -92,8 +96,9 @@ describe("label shapes that are not single English nouns", () => {
 });
 
 describe("unitLabelFor", () => {
-  // Exposed for the callers that lay the count out themselves — the Register's
-  // stepper, a signed quantity on a movement sheet.
+  // This module exposes the label for the callers that lay the count out
+  // themselves. The Register's stepper is one, and a signed Unit quantity on a
+  // movement sheet is another.
   test("returns the label alone", () => {
     expect(unitLabelFor(1, "tray")).toBe("tray");
     expect(unitLabelFor(3, "tray")).toBe("trays");

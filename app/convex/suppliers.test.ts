@@ -103,8 +103,8 @@ test("deleting a supplier that isn't archived is refused", async () => {
   ).toBe(undefined);
 });
 
-// Unlike a customer, a supplier carries no balance or other second
-// condition — archive-first is the whole gate.
+// A supplier carries no balance and no second condition, unlike a customer.
+// The archived state is the whole gate.
 test("deleting an archived supplier with no other history succeeds outright", async () => {
   const t = setupTest();
   const supplierId = await aSupplier(t, "One-Off Supplier");

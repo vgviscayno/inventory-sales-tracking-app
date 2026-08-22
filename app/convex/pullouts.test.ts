@@ -279,8 +279,8 @@ test("the below-zero warning sums a Unit-carrying pull-out's lines across the wh
     baseUnitLabel: "piece",
   });
 
-  // 1 tray (30) + 12 pieces = 42, against 40 on hand — over, even though
-  // neither line alone would be.
+  // 1 tray (30) plus 12 pieces is 42, against 40 on hand. That is a Negative
+  // projection, though neither Line alone gives one.
   await expect(
     t.mutation(api.pullouts.create, {
       lines: [

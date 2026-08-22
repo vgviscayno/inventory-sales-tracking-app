@@ -48,7 +48,7 @@ test("the ledger runs oldest to newest, and the newest row's running balance equ
   // Newest first.
   expect(rows[0].type).toBe("pullout");
   expect(rows[1].type).toBe("delivery");
-  // The delivery the fixture stocked the product with.
+  // The Delivery the fixture stocked the product with.
   expect(rows[2].type).toBe("delivery");
 
   const product = await t.query(api.products.get, { id: coke });
@@ -118,7 +118,8 @@ test("running balance accumulates oldest to newest, in a mixed sequence", async 
     productId: coke,
   });
 
-  // Newest first: +3 delivery (10), -8 pullout (7), +5 delivery (15), opening (10).
+  // Newest first: +3 Delivery (10), -8 Pull-out (7), +5 Delivery (15), and the
+  // fixture's own Delivery (10).
   expect(rows.map((r) => r.runningBalance)).toEqual([10, 7, 15, 10]);
 });
 
@@ -237,8 +238,9 @@ test("editEntry clears a delivery's supplier when passed null", async () => {
   ).toBe(undefined);
 });
 
-// Editing an unrelated field (here, the quantity) must never touch the
-// supplier — omitting `supplierId` from the call leaves it exactly as it was.
+// An edit to an unrelated field must never touch the supplier. The field here
+// is the Unit quantity. A call that omits `supplierId` leaves it exactly as it
+// was.
 test("editEntry leaves a delivery's supplier untouched when the edit doesn't mention it", async () => {
   const t = setupTest();
   const coke = await aProductHolding(t, 20);
@@ -262,8 +264,8 @@ test("editEntry leaves a delivery's supplier untouched when the edit doesn't men
   ).toMatchObject({ supplierId });
 });
 
-// The load-bearing case from the ticket: an archived supplier already
-// attached to a delivery survives an edit to an unrelated field.
+// The load-bearing case from the ticket. An archived supplier that a Delivery
+// already names survives an edit to an unrelated field.
 test("editing an unrelated field on a delivery whose supplier is archived leaves that supplier attached", async () => {
   const t = setupTest();
   const coke = await aProductHolding(t, 20);
@@ -299,8 +301,8 @@ test("editEntry ignores supplierId for a pull-out", async () => {
   });
   const [line] = (await t.query(api.pullouts.list, {}))[0].lines;
 
-  // `supplierId` isn't a pull-out concept — the arg is accepted (it's not
-  // typed per entry-type) but the handler only ever patches it onto a
+  // `supplierId` is not a Pull-out concept. The args accept it, because they
+  // are not typed per entry type. The handler only ever patches it onto a
   // `deliveries` doc, so a stray value here has nowhere to land.
   await expect(
     t.mutation(api.stockMovements.editEntry, {
@@ -409,9 +411,9 @@ test("editEntry judges a product touched by two lines on its net delta, not line
   });
   const [line] = (await t.query(api.pullouts.list, {}))[0].lines;
 
-  // Raising the existing line to 2 and adding a second line of 1 more takes
-  // coke to 2 - 3 = -1 net — below zero even though neither line alone would
-  // read that way against the stale count each was typed against.
+  // Raising the existing Line to 2 and adding a second Line of 1 more nets
+  // -1 on coke. That is a Negative projection. Neither Line alone reads that
+  // way against the stale count each was typed against.
   await expect(
     t.mutation(api.stockMovements.editEntry, {
       entry: { type: "pullout", entryId: pulloutId },
@@ -465,8 +467,8 @@ test("editEntry drives a delivery's product negative when a line is lowered, and
     lines: [{ kind: "existing", productId: coke, quantity: 10 }],
   });
   const [line] = (await t.query(api.deliveries.list, {}))[0].lines;
-  // 5 on hand came from the +10 delivery plus a -5 pull-out that happened
-  // since — lowering the delivery line to 2 would take coke to -3.
+  // The 5 on hand is the fixture's 5, plus the +10 Delivery, less the -10
+  // Pull-out below. A drop of the Delivery Line to 2 would take coke to -3.
   await t.mutation(api.pullouts.create, {
     lines: [{ productId: coke, quantity: 10 }],
     reasonCategory: "damaged",
@@ -539,8 +541,8 @@ test("editEntry treats a Unit change as dropping the old line and inserting a ne
     ],
   });
 
-  // No movementId on the new line — the sheet's way of saying "this line's
-  // Unit changed", which the mutation handles as a drop-and-insert.
+  // The new Line carries no `movementId`. That is the sheet's way of saying
+  // this Line's Unit changed. The mutation handles it as a drop and an insert.
   await t.mutation(api.stockMovements.editEntry, {
     entry: { type: "delivery", entryId: deliveryId },
     lines: [{ productId: eggs, unitLabel: "piece", quantity: 12 }],
@@ -567,7 +569,7 @@ test("editEntry's below-zero warning nets a delivery edit across two Units for o
       { kind: "existing", productId: eggs, unitLabel: "piece", quantity: 5 },
     ],
   });
-  // 65 on hand from the delivery, then 60 pulled out elsewhere — 5 left.
+  // 65 on hand from the Delivery, then 60 pulled out elsewhere, which leaves 5.
   await t.mutation(api.pullouts.create, {
     lines: [{ productId: eggs, quantity: 60 }],
     reasonCategory: "damaged",
@@ -577,9 +579,9 @@ test("editEntry's below-zero warning nets a delivery edit across two Units for o
   const pieceLine = lines.find((l) => l.unitLabel === "piece");
   if (!trayLine || !pieceLine) throw new Error("Missing a line");
 
-  // Lowering the tray line to 1 (-30) and the piece line to 1 (-4) nets -34
-  // against the 5 left — below zero, even though neither line alone reads
-  // that way against the delivery's own original quantities.
+  // A drop of the tray Line to 1 and the piece Line to 1 nets -34 against the
+  // 5 left. That is a Negative projection. Neither Line alone reads that way
+  // against the Delivery's own original Unit quantities.
   await expect(
     t.mutation(api.stockMovements.editEntry, {
       entry: { type: "delivery", entryId: deliveryId },
@@ -673,8 +675,8 @@ test("editEntry treats a pull-out line's Unit change as dropping the old line an
     reasonCategory: "damaged",
   });
 
-  // No movementId on the new line — the sheet's way of saying "this line's
-  // Unit changed", which the mutation handles as a drop-and-insert.
+  // The new Line carries no `movementId`. That is the sheet's way of saying
+  // this Line's Unit changed. The mutation handles it as a drop and an insert.
   await t.mutation(api.stockMovements.editEntry, {
     entry: { type: "pullout", entryId: pulloutId },
     lines: [{ productId: eggs, unitLabel: "piece", quantity: 12 }],
@@ -711,10 +713,9 @@ test("editEntry's below-zero warning nets a pull-out edit across two Units for o
   const pieceLine = lines.find((l) => l.unitLabel === "piece");
   if (!trayLine || !pieceLine) throw new Error("Missing a line");
 
-  // Raising the tray line from 1 to 2 (-30 more) and the piece line from 5
-  // to 6 (-1 more) nets -31 against the 5 left — below zero, even though
-  // neither line alone reads that way against the pull-out's own original
-  // quantities.
+  // The tray Line rises from 1 to 2, and the piece Line from 5 to 6. That nets
+  // -31 against the 5 left, which is a Negative projection. Neither Line alone
+  // reads that way against the Pull-out's own original Unit quantities.
   await expect(
     t.mutation(api.stockMovements.editEntry, {
       entry: { type: "pullout", entryId: pulloutId },
@@ -814,9 +815,9 @@ test("editEntry rejects an entry with no existing rows, rather than silently ins
   const t = setupTest();
   const coke = await aProductHolding(t, 20);
 
-  // A header row with no movements pointing at it yet — not something the
-  // create mutations ever produce, but exactly the shape a bogus `entryId`
-  // paired with an all-new line set would otherwise sail through as.
+  // A header row with no Movements pointing at it yet. The create mutations
+  // never produce this shape. It is exactly the shape a bogus `entryId` paired
+  // with an all-new Line set would otherwise sail through as.
   const orphanDeliveryId = await t.run(
     async (ctx) => await ctx.db.insert("deliveries", { createdAt: Date.now() }),
   );
@@ -850,8 +851,9 @@ test("the cache tracks the ledger through an edit that both adds and drops lines
   const cokeLine = before?.find((l) => l.productId === coke);
   if (!cokeLine) throw new Error("Missing coke line");
 
-  // Keep the coke line at a changed quantity, drop the pancit line, and add a
-  // brand-new noodles line — a delete, a patch, and an insert in one save.
+  // Keep the coke Line at a changed Unit quantity, drop the pancit Line, and
+  // add a brand-new noodles Line. That is a delete, a patch, and an insert in
+  // one save.
   await t.mutation(api.stockMovements.editEntry, {
     entry: { type: "delivery", entryId: deliveryId },
     lines: [
@@ -962,9 +964,9 @@ test("deleteEntry judges the negative-stock warning on the entry's net effect ac
   const t = setupTest();
   const coke = await aProductHolding(t, 5, { name: "Coke 1.5L" });
 
-  // A delivery of 10, then a pull-out of 10 that used part of it — coke sits
-  // at 5. Deleting the delivery reverses +10, which would take coke to -5
-  // once the pull-out's -10 is still on the ledger.
+  // A Delivery of 10, then a Pull-out of 10 that used part of it, leaves coke
+  // at 5. A delete of the Delivery reverses +10, which would take coke to -5.
+  // The Pull-out's -10 is still on the Ledger.
   const deliveryId = await t.mutation(api.deliveries.create, {
     lines: [{ kind: "existing", productId: coke, quantity: 10 }],
   });

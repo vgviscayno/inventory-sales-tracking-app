@@ -181,8 +181,8 @@ test("a delivery line's shape is enforced by the union validator, not a hand-rol
 
 test("a failed line leaves neither the new product nor the delivery behind", async () => {
   const t = setupTest();
-  // Held at zero so the only delivery this test could see is the one it tries
-  // (and fails) to log — a stocked fixture would log one of its own.
+  // The fixture holds zero. The only Delivery this test can see is the one it
+  // tries to log, and fails to. A stocked fixture would log one of its own.
   const coke = await aProductHolding(t, 0);
 
   await expect(
@@ -281,8 +281,8 @@ test("an existing line with no Unit named falls back to the product's Default un
 
 test("deliveries list newest first, each carrying its lines and net change", async () => {
   const t = setupTest();
-  // Both held at zero: this test counts deliveries, and a stocked fixture
-  // logs one of its own that would sit in the list beside them.
+  // Both fixtures hold zero. This test counts Deliveries, and a stocked fixture
+  // logs one of its own. That Delivery would sit in the list beside them.
   const coke = await aProductHolding(t, 0, { name: "Coke 1.5L" });
   const pancit = await aProductHolding(t, 0, {
     name: "Lucky Me Pancit Canton",
