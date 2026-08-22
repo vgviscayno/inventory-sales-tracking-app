@@ -18,7 +18,7 @@ const EGGS = {
   baseUnitLabel: "pc",
 };
 
-// Onions: rungs that don't divide into each other — a sack is 8⅓ bundles.
+// Onions: denominations that don't divide into each other — a sack is 8⅓ bundles.
 const ONIONS = {
   units: [
     { label: "pc", baseEquivalent: 1 },
@@ -44,15 +44,15 @@ describe("buildReadingLadder", () => {
   test("sorts by descending Base equivalent, not by the order they were ticked", () => {
     expect(
       labels(
-        buildReadingLadder({ ...EGGS, readingUnitLabels: ["tray", "case"] }),
+        buildReadingLadder({ ...EGGS, denominationLabels: ["tray", "case"] }),
       ),
     ).toEqual(["case", "tray", "pc"]);
   });
 
-  test("appends the Base unit as the final rung even when it was not selected", () => {
+  test("appends the Base unit as the final denomination even when it was not selected", () => {
     expect(
       labels(
-        buildReadingLadder({ ...RICE, readingUnitLabels: ["sako", "kilo"] }),
+        buildReadingLadder({ ...RICE, denominationLabels: ["sako", "kilo"] }),
       ),
     ).toEqual(["sako", "kilo", "g"]);
   });
@@ -60,7 +60,7 @@ describe("buildReadingLadder", () => {
   test("an absent or empty selection is the plain Base-unit reading", () => {
     expect(labels(buildReadingLadder(EGGS))).toEqual(["pc"]);
     expect(
-      labels(buildReadingLadder({ ...EGGS, readingUnitLabels: [] })),
+      labels(buildReadingLadder({ ...EGGS, denominationLabels: [] })),
     ).toEqual(["pc"]);
   });
 
@@ -70,7 +70,7 @@ describe("buildReadingLadder", () => {
         labels(
           buildReadingLadder({
             ...EGGS,
-            readingUnitLabels: ["crate", "tray"],
+            denominationLabels: ["crate", "tray"],
           }),
         ),
       ).toEqual(["tray", "pc"]);
@@ -85,7 +85,7 @@ describe("buildReadingLadder", () => {
         labels(
           buildReadingLadder({
             ...withTwin,
-            readingUnitLabels: ["tray", "plateau"],
+            denominationLabels: ["tray", "plateau"],
           }),
         ),
       ).toEqual(["tray", "pc"]);
@@ -93,7 +93,7 @@ describe("buildReadingLadder", () => {
 
     test("ignores a selection no coarser than the Base unit", () => {
       expect(
-        labels(buildReadingLadder({ ...EGGS, readingUnitLabels: ["pc"] })),
+        labels(buildReadingLadder({ ...EGGS, denominationLabels: ["pc"] })),
       ).toEqual(["pc"]);
     });
 
@@ -103,7 +103,7 @@ describe("buildReadingLadder", () => {
           buildReadingLadder({
             units: [{ label: "tray", baseEquivalent: 30 }],
             baseUnitLabel: "pc",
-            readingUnitLabels: ["tray"],
+            denominationLabels: ["tray"],
           }),
         ),
       ).toEqual(["tray", "pc"]);
@@ -114,17 +114,17 @@ describe("buildReadingLadder", () => {
 describe("readQuantity", () => {
   const ladderFor = (
     product: Parameters<typeof buildReadingLadder>[0],
-    readingUnitLabels: string[],
-  ) => buildReadingLadder({ ...product, readingUnitLabels });
+    denominationLabels: string[],
+  ) => buildReadingLadder({ ...product, denominationLabels });
 
-  test("a two-rung ladder reads the way the Default unit used to", () => {
+  test("a ladder of two Denominations reads the way the Default unit used to", () => {
     expect(readQuantity(305, ladderFor(EGGS, ["tray"]))).toEqual([
       { count: 10, unitLabel: "tray" },
       { count: 5, unitLabel: "pc" },
     ]);
   });
 
-  test("a three-rung ladder reads greedily, each rung taking its whole count", () => {
+  test("a longer ladder reads greedily, each Denomination taking its whole count", () => {
     expect(readQuantity(1085, ladderFor(EGGS, ["case", "tray"]))).toEqual([
       { count: 3, unitLabel: "case" },
       { count: 0, unitLabel: "tray" },
@@ -132,7 +132,7 @@ describe("readQuantity", () => {
     ]);
   });
 
-  test("rungs that don't divide into each other still read exactly", () => {
+  test("denominations that don't divide into each other still read exactly", () => {
     const terms = readQuantity(437, ladderFor(ONIONS, ["sack", "bundle"]));
     expect(terms).toEqual([
       { count: 4, unitLabel: "sack" },
@@ -167,7 +167,7 @@ describe("readQuantity", () => {
     ]);
   });
 
-  test("a Base amount below one rung", () => {
+  test("a Base amount below one denomination", () => {
     expect(readQuantity(5, ladderFor(EGGS, ["tray"]))).toEqual([
       { count: 0, unitLabel: "tray" },
       { count: 5, unitLabel: "pc" },
@@ -194,7 +194,7 @@ describe("readQuantity", () => {
 });
 
 describe("formatReading", () => {
-  test("spells every rung that counts, in ladder order", () => {
+  test("spells every denomination that counts, in ladder order", () => {
     expect(
       formatReading([
         { count: 4, unitLabel: "sack" },
@@ -204,7 +204,7 @@ describe("formatReading", () => {
     ).toBe("4 sacks, 3 bundles, 1 pc");
   });
 
-  test("a rung that counts zero is not spoken", () => {
+  test("a denomination that counts zero is not spoken", () => {
     expect(
       formatReading([
         { count: 3, unitLabel: "case" },
@@ -250,7 +250,7 @@ describe("formatStock", () => {
       formatStock({
         ...EGGS,
         quantityOnHand: 1085,
-        readingUnitLabels: ["tray", "case"],
+        denominationLabels: ["tray", "case"],
       }),
     ).toBe("3 cases, 5 pcs");
   });
@@ -264,7 +264,7 @@ describe("formatStock", () => {
       formatStock({
         ...EGGS,
         quantityOnHand: 305,
-        readingUnitLabels: ["tray"],
+        denominationLabels: ["tray"],
       }),
     ).toBe("10 trays, 5 pcs");
   });

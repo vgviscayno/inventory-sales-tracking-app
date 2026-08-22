@@ -606,17 +606,17 @@ test("the Reading ladder round-trips, and an unticked box clears it", async () =
 
   await t.mutation(api.products.update, {
     id: eggs,
-    readingUnitLabels: ["tray"],
+    denominationLabels: ["tray"],
   });
   expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
-    readingUnitLabels: ["tray"],
+    denominationLabels: ["tray"],
   });
 
   // An empty array is the clear — it already means "read plainly", so the
   // ladder needs no separate null the way the threshold and Default unit do.
-  await t.mutation(api.products.update, { id: eggs, readingUnitLabels: [] });
+  await t.mutation(api.products.update, { id: eggs, denominationLabels: [] });
   expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
-    readingUnitLabels: [],
+    denominationLabels: [],
   });
 });
 
@@ -629,7 +629,7 @@ test("a ladder set on a product reaches the delete gate's message", async () => 
   });
   await t.mutation(api.products.update, {
     id: eggs,
-    readingUnitLabels: ["tray"],
+    denominationLabels: ["tray"],
   });
   await t.mutation(api.products.archive, { id: eggs });
 
@@ -649,7 +649,7 @@ test("a ladder naming a Unit that has since been removed degrades to the plain r
   });
   await t.mutation(api.products.update, {
     id: eggs,
-    readingUnitLabels: ["tray"],
+    denominationLabels: ["tray"],
   });
   // The tray goes; the stored ladder still names it. Reading it must not be
   // what breaks the screen — see `buildReadingLadder`.
@@ -670,10 +670,10 @@ test("a product can be created with a Reading ladder already set", async () => {
     name: "Eggs",
     units: EGGS_UNITS,
     baseUnitLabel: "piece",
-    readingUnitLabels: ["tray"],
+    denominationLabels: ["tray"],
   });
 
   expect(await t.query(api.products.get, { id })).toMatchObject({
-    readingUnitLabels: ["tray"],
+    denominationLabels: ["tray"],
   });
 });

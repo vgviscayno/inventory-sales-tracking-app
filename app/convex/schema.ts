@@ -38,7 +38,7 @@ export default defineSchema({
     // one of the unbounded arrays the Convex guidelines warn against. See
     // CONTEXT.md's "Reading ladder" and remainderReading.ts — this only
     // changes how a quantity is read, never how it's held.
-    readingUnitLabels: v.optional(v.array(v.string())),
+    denominationLabels: v.optional(v.array(v.string())),
     // Uniform two-state lifecycle, absent meaning active. Only `archivedAt`
     // is exercised in this ticket — `deletedAt` lands with it as one schema
     // edit so soft-delete (the next ticket) doesn't need a second migration.

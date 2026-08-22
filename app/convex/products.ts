@@ -207,7 +207,7 @@ export const create = mutation({
     // The Reading ladder, same posture as in `update`: labels are stored as
     // given and resolved on every read, so nothing here has to be kept in
     // step with a later Unit rename or removal.
-    readingUnitLabels: v.optional(v.array(v.string())),
+    denominationLabels: v.optional(v.array(v.string())),
   },
   // Always born at zero. Delivery logging is the only way to raise a count,
   // so there is no starting number to take from a caller — and none that the
@@ -257,7 +257,7 @@ export const update = mutation({
     // decided on every read by `buildReadingLadder` rather than at write time,
     // so a Unit renamed or deleted later degrades the reading instead of
     // leaving a wrong one stored.
-    readingUnitLabels: v.optional(v.array(v.string())),
+    denominationLabels: v.optional(v.array(v.string())),
   },
   handler: async (
     ctx,
@@ -268,7 +268,7 @@ export const update = mutation({
       baseUnitLabel,
       defaultUnitLabel,
       lowStockThreshold,
-      readingUnitLabels,
+      denominationLabels,
     },
   ) => {
     const patch: {
@@ -277,14 +277,14 @@ export const update = mutation({
       baseUnitLabel?: string;
       defaultUnitLabel?: string;
       lowStockThreshold?: number;
-      readingUnitLabels?: string[];
+      denominationLabels?: string[];
     } = {};
     if (name !== undefined) patch.name = name;
     if (lowStockThreshold !== undefined) {
       patch.lowStockThreshold = lowStockThreshold ?? undefined;
     }
-    if (readingUnitLabels !== undefined) {
-      patch.readingUnitLabels = readingUnitLabels;
+    if (denominationLabels !== undefined) {
+      patch.denominationLabels = denominationLabels;
     }
 
     const touchesUnits = units !== undefined || baseUnitLabel !== undefined;

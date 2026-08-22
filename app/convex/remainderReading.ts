@@ -8,18 +8,18 @@
  *
  *   1. It is sorted by descending Base equivalent, not by the order the boxes
  *      happened to be ticked in.
- *   2. It is read greedily — each rung takes its whole count, the remainder
+ *   2. It is read greedily — each denomination takes its whole count, the remainder
  *      falls through.
- *   3. The Base unit is always the final rung, appended whether or not it was
- *      selected. Without it a remainder finer than the lowest selected rung
+ *   3. The Base unit is always the final denomination, appended whether or not it was
+ *      selected. Without it a remainder finer than the lowest selected denomination
  *      has nowhere to go and the reading silently *understates the shelf* —
  *      rice on a `[sako, kilo]` ladder would drop the trailing 400 g.
  *
- * Rungs are not required to divide into each other. A greedy read stays
- * arithmetically exact either way, because each rung takes only its whole
+ * Denominations are not required to divide into each other. A greedy read stays
+ * arithmetically exact either way, because each denomination takes only its whole
  * count: onions on `[sack of 100, bundle of 12]` read 437 as "4 sacks, 3
  * bundles, 1 pc", and the terms add back to exactly 437. What non-nesting
- * rungs cost is readability — a bundle count can climb to 8 without ever
+ * denominations cost is readability — a bundle count can climb to 8 without ever
  * rolling into a sack — and that cost is accepted rather than refused.
  *
  * Each term's label is inflected to agree with its own count — "1 tray, 5
@@ -40,12 +40,12 @@ import { formatCount } from "./unitLabels";
 
 export type Unit = { label: string; baseEquivalent: number };
 
-/** One rung's contribution to a reading — "3 cases" is `3` and `"case"`. */
+/** One denomination's contribution to a reading — "3 cases" is `3` and `"case"`. */
 export type ReadingTerm = { count: number; unitLabel: string };
 
 /**
- * A figure read against a ladder, one term per rung and in ladder order.
- * Zero-counting rungs are still present here — `formatReading` is what
+ * A figure read against a ladder, one term per denomination and in ladder order.
+ * Zero-counting denominations are still present here — `formatReading` is what
  * decides they aren't spoken, so a caller that wants the full decomposition
  * can still have it.
  */
@@ -54,7 +54,7 @@ export type QuantityReading = ReadingTerm[];
 type LadderInput = {
   units: Unit[];
   baseUnitLabel: string;
-  readingUnitLabels?: string[];
+  denominationLabels?: string[];
 };
 
 /** A Base equivalent that can actually be divided by. */
@@ -63,9 +63,9 @@ function isUsable(baseEquivalent: number) {
 }
 
 /**
- * The Base unit as a rung. It is the one rung fine enough to hold whatever
+ * The Base unit as a denomination. It is the one denomination fine enough to hold whatever
  * the coarser ones leave behind, so it is stood in when its label names no
- * Unit — there is no reading to give without a final rung. (`validateUnits`
+ * Unit — there is no reading to give without a final denomination. (`validateUnits`
  * pins a real Base unit at 1; this is for a product read while its Units are
  * mid-edit, and for the stand-in itself.)
  */
@@ -86,13 +86,13 @@ function resolveBaseUnit({
  * The Units that can be put on a product's ladder: everything coarser than
  * its Base unit, coarsest first, one per label. Exported so the product form
  * offers exactly the boxes `buildReadingLadder` would honour — the two must
- * never disagree, or the form offers a rung the reading silently drops.
+ * never disagree, or the form offers a denomination the reading silently drops.
  *
  * Deliberately *not* deduped by Base equivalent, unlike the ladder itself: two
  * same-sized Units are two real Units and both are tickable. Which of them
  * wins is the reading's call, and the form previews the result.
  */
-export function selectableRungs(product: {
+export function selectableDenominations(product: {
   units: Unit[];
   baseUnitLabel: string;
 }): Unit[] {
@@ -111,7 +111,8 @@ export function selectableRungs(product: {
 /**
  * The Units a product's stock is spelled out in, coarsest first and always
  * ending at its Base unit. An absent or empty selection yields just the Base
- * unit — a one-rung ladder, which reads as the plain Base-unit figure, so the
+ * unit — a ladder of one Denomination, which reads as the plain Base-unit
+ * figure, so the
  * plain reading is the degenerate case of this rather than a separate branch.
  *
  * Three selections are dropped rather than refused, since a stale ladder must
@@ -125,16 +126,16 @@ export function selectableRungs(product: {
  *     decompose into.
  */
 export function buildReadingLadder(product: LadderInput): Unit[] {
-  const { units, readingUnitLabels } = product;
+  const { units, denominationLabels } = product;
   const baseUnit = resolveBaseUnit(product);
 
-  const rungs: Unit[] = [];
+  const denominations: Unit[] = [];
   const taken = new Set<number>([baseUnit.baseEquivalent]);
-  const resolved = (readingUnitLabels ?? [])
+  const resolved = (denominationLabels ?? [])
     .map((label) => units.find((u) => u.label === label))
     .filter((unit): unit is Unit => unit !== undefined)
     // Selection order is not trusted: sorting here is what makes the greedy
-    // read below take the coarsest rung first.
+    // read below take the coarsest denomination first.
     .sort((a, b) => b.baseEquivalent - a.baseEquivalent);
 
   for (const unit of resolved) {
@@ -142,15 +143,15 @@ export function buildReadingLadder(product: LadderInput): Unit[] {
     if (unit.baseEquivalent <= baseUnit.baseEquivalent) continue;
     if (taken.has(unit.baseEquivalent)) continue;
     taken.add(unit.baseEquivalent);
-    rungs.push(unit);
+    denominations.push(unit);
   }
 
-  return [...rungs, baseUnit];
+  return [...denominations, baseUnit];
 }
 
 /**
- * Reads a Base-unit figure down a ladder, greedily. Every rung gets a term,
- * zero or not, and the final rung takes the whole remaining amount rather
+ * Reads a Base-unit figure down a ladder, greedily. Every denomination gets a term,
+ * zero or not, and the final denomination takes the whole remaining amount rather
  * than its whole count — so the terms always sum back to `quantityOnHand`
  * exactly, including when the figure carries a fraction the Base unit can
  * hold.
@@ -160,7 +161,7 @@ export function readQuantity(
   ladder: Unit[],
 ): QuantityReading {
   // Exported independently of `buildReadingLadder`, which is the only thing
-  // guaranteeing a final rung — so an empty ladder reads as nothing rather
+  // guaranteeing a final denomination — so an empty ladder reads as nothing rather
   // than indexing off the end of it.
   if (ladder.length === 0) return [];
   const finest = ladder[ladder.length - 1];
@@ -170,7 +171,7 @@ export function readQuantity(
   // wouldn't mean anything.
   if (quantityOnHand < 0) {
     // Divided the same way the positive branch's final term is, so the two
-    // agree on the stand-in path where the finest rung isn't a Base
+    // agree on the stand-in path where the finest denomination isn't a Base
     // equivalent of 1 (a product read mid-edit — see `resolveBaseUnit`).
     return [
       {
@@ -183,10 +184,10 @@ export function readQuantity(
   const terms: ReadingTerm[] = [];
   let remaining = quantityOnHand;
   for (let i = 0; i < ladder.length - 1; i++) {
-    const rung = ladder[i];
-    const count = Math.floor(remaining / rung.baseEquivalent);
-    remaining -= count * rung.baseEquivalent;
-    terms.push({ count, unitLabel: rung.label });
+    const denomination = ladder[i];
+    const count = Math.floor(remaining / denomination.baseEquivalent);
+    remaining -= count * denomination.baseEquivalent;
+    terms.push({ count, unitLabel: denomination.label });
   }
   terms.push({
     count: remaining / finest.baseEquivalent,
@@ -196,9 +197,9 @@ export function readQuantity(
 }
 
 /**
- * Speaks a reading. A rung that comes to zero is dropped rather than padded
+ * Speaks a reading. A denomination that comes to zero is dropped rather than padded
  * out — "3 cases, 5 pcs", never "3 cases, 0 trays, 5 pcs" — and a figure
- * where every rung is zero falls back to "0 «base unit»", since dropping them
+ * where every denomination is zero falls back to "0 «base unit»", since dropping them
  * all would leave nothing on the screen at all.
  *
  * Each term goes through `formatCount` so its label agrees with its own count
@@ -208,7 +209,7 @@ export function readQuantity(
 export function formatReading(reading: QuantityReading): string {
   const spoken = reading.filter((term) => term.count !== 0);
   if (spoken.length === 0) {
-    // Every rung came to zero (or there were none at all): dropping them all
+    // Every denomination came to zero (or there were none at all): dropping them all
     // would leave the screen blank, so the finest one speaks its zero.
     const finest = reading[reading.length - 1];
     return finest ? formatCount(0, finest.unitLabel) : "";
