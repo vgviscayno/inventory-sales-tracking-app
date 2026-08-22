@@ -1,12 +1,18 @@
 import { expect, test } from "vitest";
 import { api } from "./_generated/api";
 import {
+  buildReadingLadder,
+  formatReading,
+  readQuantity,
+} from "./remainderReading";
+import {
   aCustomer,
   aProductHolding,
   aSupplier,
   expectCacheMatchesLedger,
   setupTest,
 } from "./test.helpers";
+import { formatCount } from "./unitLabels";
 
 test("an archived product's name still renders on its own ledger and on past delivery lines", async () => {
   const t = setupTest();
@@ -1019,4 +1025,109 @@ test("deleteEntry cascades every line's own delta, not just the first product to
   });
   await expectCacheMatchesLedger(t, coke);
   await expectCacheMatchesLedger(t, pancit);
+});
+
+test("each ledger row reads in the Unit it was recorded in, while the running balance stays in Base units", async () => {
+  const t = setupTest();
+  // The fixture stocks a product in its Base unit. The Ledger therefore holds
+  // two piece rows and one tray row against one product.
+  const eggs = await aProductHolding(t, 60, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 2 },
+    ],
+  });
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "piece", quantity: 5 }],
+  });
+
+  const rows = await t.query(api.stockMovements.listForProduct, {
+    productId: eggs,
+  });
+
+  expect(rows).toMatchObject([
+    { unitLabel: "piece", unitQuantity: -5, netChange: -5 },
+    { unitLabel: "tray", unitQuantity: 2, netChange: 60 },
+    { unitLabel: "piece", unitQuantity: 60, netChange: 60 },
+  ]);
+  // The balance is in Base units on every row, and the rows read newest first.
+  expect(rows.map((r) => r.runningBalance)).toEqual([115, 120, 60]);
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("a movement whose Unit the product no longer holds still reads under the label it was recorded with", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 60, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "tray", quantity: 2 }],
+  });
+
+  // The shop stops selling eggs by the tray. The Unit leaves the product.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [{ label: "piece", baseEquivalent: 1, price: 8 }],
+  });
+
+  const rows = await t.query(api.stockMovements.listForProduct, {
+    productId: eggs,
+  });
+  expect(rows[0]).toMatchObject({
+    unitLabel: "tray",
+    unitQuantity: -2,
+    // The snapshot holds, so the row still comes to 60 pieces.
+    netChange: -60,
+    lineTotal: 440,
+  });
+  // What the row reads as on screen. The Ledger lays the count out itself, the
+  // same way the Register does. See unitLabels.ts.
+  expect(formatCount(rows[0].unitQuantity, rows[0].unitLabel)).toBe("-2 trays");
+  await expectCacheMatchesLedger(t, eggs);
+});
+
+test("the running balance reads against the product's Reading ladder, whatever Unit each row was recorded in", async () => {
+  const t = setupTest();
+  const eggs = await aProductHolding(t, 60, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+  });
+  await t.mutation(api.products.update, {
+    id: eggs,
+    denominationLabels: ["tray"],
+  });
+
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 2 },
+    ],
+  });
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "piece", quantity: 5 }],
+  });
+
+  const rows = await t.query(api.stockMovements.listForProduct, {
+    productId: eggs,
+  });
+  const product = await t.query(api.products.get, { id: eggs });
+  if (!product) throw new Error("No product");
+  const ladder = buildReadingLadder(product);
+
+  // The product detail page reads the column this way. Every row goes through
+  // one ladder, so a tray row and a piece row give the same kind of reading.
+  expect(
+    rows.map((r) => formatReading(readQuantity(r.runningBalance, ladder))),
+  ).toEqual(["3 trays, 25 pieces", "4 trays", "2 trays"]);
 });
