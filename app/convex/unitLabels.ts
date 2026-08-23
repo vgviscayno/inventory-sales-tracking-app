@@ -17,8 +17,8 @@
  * Every screen that shows a count beside a label goes through this module, so
  * the wording cannot drift apart. The stock readings in remainderReading.ts,
  * the Delivery sheet, and the Pull-out sheet call `formatCount`. The
- * Register's cart Lines and the Sale sheet lay the count out themselves, and
- * call `unitLabelFor`.
+ * Register's cart Lines, the Sale sheet, and the product Ledger's rows lay the
+ * count out themselves, and call `unitLabelFor`.
  * A price quote is not a count and stays singular, as in "₱30 / tray". A label
  * that stands alone in a picker stays singular too.
  */

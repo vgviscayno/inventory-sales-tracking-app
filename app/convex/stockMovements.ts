@@ -243,6 +243,10 @@ export async function entryLines(
         unitLabel: m.unitLabel,
         unitQuantity: m.unitQuantity,
         baseAmount: deriveBaseAmount(m),
+        // The Movements tab merges two Lines only where this figure agrees
+        // too. The label alone does not identify a Unit. See
+        // src/app/movements/entryReading.ts.
+        baseEquivalentAtEntry: m.baseEquivalentAtEntry,
       };
     }),
   );

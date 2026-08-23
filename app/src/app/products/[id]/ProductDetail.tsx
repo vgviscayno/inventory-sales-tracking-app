@@ -8,9 +8,14 @@ import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import {
+  buildReadingLadder,
+  formatReading,
   formatStock,
+  readQuantity,
   selectableDenominations,
+  type Unit,
 } from "../../../../convex/remainderReading";
+import { unitLabelFor } from "../../../../convex/unitLabels";
 import { formatTime, signed } from "../../format";
 import { DeliverySheet } from "../../movements/DeliverySheet";
 import { PulloutSheet } from "../../movements/PulloutSheet";
@@ -567,7 +572,7 @@ function ProductForm({ product }: { product: Product }) {
         </div>
       )}
 
-      <ProductLedger productId={product._id} onOpenEntry={setOpenEntry} />
+      <ProductLedger product={product} onOpenEntry={setOpenEntry} />
 
       {openEntry?.kind === "delivery" && (
         <DeliverySheet
@@ -916,13 +921,17 @@ type OpenEntry =
  * to make.
  */
 function ProductLedger({
-  productId,
+  product,
   onOpenEntry,
 }: {
-  productId: Id<"products">;
+  product: Product;
   onOpenEntry: (entry: OpenEntry) => void;
 }) {
-  const rows = useQuery(api.stockMovements.listForProduct, { productId });
+  const rows = useQuery(api.stockMovements.listForProduct, {
+    productId: product._id,
+  });
+  // One ladder serves every row. See `LedgerRowView`.
+  const ladder = buildReadingLadder(product);
 
   return (
     <div className="space-y-2">
@@ -936,7 +945,11 @@ function ProductLedger({
         viewportH={LEDGER_VIEWPORT_H}
         empty={rows === undefined ? "Loading…" : "No movements yet"}
         renderRow={(row) => (
-          <LedgerRowView row={row} onOpen={openEntryFor(row, onOpenEntry)} />
+          <LedgerRowView
+            row={row}
+            ladder={ladder}
+            onOpen={openEntryFor(row, onOpenEntry)}
+          />
         )}
       />
     </div>
@@ -981,18 +994,29 @@ function ledgerContext(row: LedgerRow): string | null {
   return null;
 }
 
+/**
+ * One Ledger row. The figure on the right reads in the Movement's own Unit, as
+ * in "-2 trays". The row snapshots the Unit and the Unit quantity. A Unit that
+ * the product no longer holds therefore still reads under the label it was
+ * recorded with.
+ * The running balance under it does not follow the row's Unit. It reads against
+ * the product's own Reading ladder, so the whole column reads as one running
+ * figure and not as a mixture of trays and pieces down the page.
+ */
 function LedgerRowView({
   row,
+  ladder,
   onOpen,
 }: {
   row: LedgerRow;
+  ladder: Unit[];
   onOpen?: () => void;
 }) {
   const context = ledgerContext(row);
   const changeColor =
-    row.netChange > 0
+    row.unitQuantity > 0
       ? "text-accent"
-      : row.netChange < 0
+      : row.unitQuantity < 0
         ? "text-danger"
         : "text-sub";
 
@@ -1009,9 +1033,12 @@ function LedgerRowView({
       </div>
       <div className="shrink-0 pl-3 text-right">
         <div className={`font-bold ${changeColor}`}>
-          {signed(row.netChange)}
+          {signed(row.unitQuantity)}{" "}
+          {unitLabelFor(row.unitQuantity, row.unitLabel)}
         </div>
-        <div className="text-sub text-[11px]">→ {row.runningBalance}</div>
+        <div className="text-sub text-[11px]">
+          → {formatReading(readQuantity(row.runningBalance, ladder))}
+        </div>
       </div>
     </>
   );

@@ -239,6 +239,9 @@ export function formatReading(reading: QuantityReading): string {
  * The callers include the products list, the Register grid, and the product
  * detail page. The on-hand and projection hints on both movement sheets are
  * callers. So is the delete gate in `products.remove`.
+ * The product Ledger's running balance column calls the trio directly. It
+ * builds the ladder once and reads every row's balance against it, so one
+ * `formatStock` call per row would rebuild the same ladder.
  */
 export function formatStock(
   product: LadderInput & { quantityOnHand: number },
