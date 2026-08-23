@@ -69,7 +69,8 @@ export const update = mutation({
     // `null` clears the notes back to unset. An omitted value leaves the
     // stored value untouched. Convex drops an `undefined` arg before the
     // mutation runs, so `undefined` cannot mean "clear". This is the same trap
-    // and the same workaround as `lowStockThreshold` in `products.update`.
+    // and the same workaround as `lowStockThresholdInDefaultUnits` in
+    // `products.update`.
     notes: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, { id, notes, ...patch }) => {

@@ -2,12 +2,19 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { filterLifecycle } from "./lifecycle";
+import {
+  thresholdInDefaultUnits,
+  thresholdToBaseUnits,
+} from "./lowStockThreshold";
 import { formatStock } from "./remainderReading";
 import { unitValidator } from "./schema";
 
 // The shop-wide low-stock threshold when `appSettings` holds no row. The
 // table holds one row, and no function here writes it. The Convex dashboard
 // is the only way to set another number.
+// This number counts each product's own Default unit, and not Base units. One
+// `10` therefore means "under ten of however I sell it". See "Low-stock
+// threshold" in CONTEXT.md, and see `withStatus`.
 const DEFAULT_THRESHOLD = 10;
 
 /**
@@ -141,17 +148,37 @@ function withStatus<
   },
 >(product: T, globalThreshold: number) {
   const defaultUnit = resolveDefaultUnit(product);
+  // The stored override read back in the Default unit. The form shows this
+  // number, so the shopkeeper reads "5" where she typed "5". See
+  // lowStockThreshold.ts.
+  const lowStockThresholdInDefaultUnits =
+    product.lowStockThreshold === undefined
+      ? undefined
+      : thresholdInDefaultUnits(product.lowStockThreshold, defaultUnit);
   if (product.archivedAt !== undefined) {
-    return { ...product, lowStockStatus: undefined, defaultUnit };
+    return {
+      ...product,
+      lowStockStatus: undefined,
+      lowStockThresholdInDefaultUnits,
+      defaultUnit,
+    };
   }
-  const threshold = product.lowStockThreshold ?? globalThreshold;
+  // The per-product override already stores Base units. The shop-wide number
+  // counts Default units, so it converts here, on every read.
+  const threshold =
+    product.lowStockThreshold ?? globalThreshold * defaultUnit.baseEquivalent;
   const lowStockStatus =
     product.quantityOnHand < 0
       ? ("negative" as const)
       : product.quantityOnHand <= threshold
         ? ("low" as const)
         : ("ok" as const);
-  return { ...product, lowStockStatus, defaultUnit };
+  return {
+    ...product,
+    lowStockStatus,
+    lowStockThresholdInDefaultUnits,
+    defaultUnit,
+  };
 }
 
 export const list = query({
@@ -210,7 +237,11 @@ export const create = mutation({
     units: v.array(unitValidator),
     baseUnitLabel: v.string(),
     defaultUnitLabel: v.optional(v.string()),
-    lowStockThreshold: v.optional(v.number()),
+    // The per-product threshold, counted in the Default unit this call names.
+    // The row stores Base units under `lowStockThreshold`. The arg spells its
+    // own denomination out. The two numbers differ by a factor nobody can see
+    // at the call site. See lowStockThreshold.ts.
+    lowStockThresholdInDefaultUnits: v.optional(v.number()),
     // The Reading ladder, with the same posture as in `update`. The row stores
     // the labels as given, and every read resolves them. Nothing here therefore
     // has to keep step with a later Unit rename or removal.
@@ -219,7 +250,16 @@ export const create = mutation({
   // A product is always born at zero. A Delivery is the only way to raise a
   // count, so this mutation takes no starting number. A starting number is also
   // a number the Ledger cannot account for.
-  handler: async (ctx, { units, baseUnitLabel, defaultUnitLabel, ...args }) => {
+  handler: async (
+    ctx,
+    {
+      units,
+      baseUnitLabel,
+      defaultUnitLabel,
+      lowStockThresholdInDefaultUnits,
+      ...args
+    },
+  ) => {
     validateUnits(units, baseUnitLabel);
     validateDefaultUnit(units, defaultUnitLabel);
     return await ctx.db.insert("products", {
@@ -227,6 +267,13 @@ export const create = mutation({
       units,
       baseUnitLabel,
       defaultUnitLabel,
+      lowStockThreshold:
+        lowStockThresholdInDefaultUnits === undefined
+          ? undefined
+          : thresholdToBaseUnits(
+              lowStockThresholdInDefaultUnits,
+              resolveDefaultUnit({ units, baseUnitLabel, defaultUnitLabel }),
+            ),
       quantityOnHand: 0,
     });
   },
@@ -256,11 +303,14 @@ export const update = mutation({
     // `undefined` arg before the mutation runs, so `undefined` cannot mean
     // "clear".
     defaultUnitLabel: v.optional(v.union(v.string(), v.null())),
-    // `null` clears the per-product override back to the shop-wide default. An
-    // omitted value leaves the stored value untouched. Convex drops an
-    // `undefined` arg before the mutation runs, so `undefined` cannot mean
-    // "clear".
-    lowStockThreshold: v.optional(v.union(v.number(), v.null())),
+    // The per-product threshold, counted in the Default unit the product leads
+    // with right now. A Default unit this same call nominates does not
+    // denominate it. The form the number came from carried the old label. See
+    // lowStockThreshold.ts.
+    // `null` clears the override back to the shop-wide default. An omitted
+    // value leaves the stored value untouched. Convex drops an `undefined` arg
+    // before the mutation runs, so `undefined` cannot mean "clear".
+    lowStockThresholdInDefaultUnits: v.optional(v.union(v.number(), v.null())),
     // The Reading ladder. An empty array is the clear, because an empty ladder
     // already means the plain reading. This field therefore needs no `null`,
     // unlike the two fields above. An explicit value always wins, and an
@@ -279,10 +329,16 @@ export const update = mutation({
       units,
       baseUnitLabel,
       defaultUnitLabel,
-      lowStockThreshold,
+      lowStockThresholdInDefaultUnits,
       denominationLabels,
     },
   ) => {
+    // Every branch below needs the product as it stands. The threshold needs
+    // the Default unit it is entered in, and the Unit rules need whichever
+    // half of the state this call left out.
+    const product = await ctx.db.get(id);
+    if (!product) throw new Error("Product not found");
+
     const patch: {
       name?: string;
       units?: typeof units;
@@ -292,8 +348,14 @@ export const update = mutation({
       denominationLabels?: string[];
     } = {};
     if (name !== undefined) patch.name = name;
-    if (lowStockThreshold !== undefined) {
-      patch.lowStockThreshold = lowStockThreshold ?? undefined;
+    if (lowStockThresholdInDefaultUnits !== undefined) {
+      patch.lowStockThreshold =
+        lowStockThresholdInDefaultUnits === null
+          ? undefined
+          : thresholdToBaseUnits(
+              lowStockThresholdInDefaultUnits,
+              resolveDefaultUnit(product),
+            );
     }
     if (denominationLabels !== undefined) {
       patch.denominationLabels = denominationLabels;
@@ -301,9 +363,6 @@ export const update = mutation({
 
     const touchesUnits = units !== undefined || baseUnitLabel !== undefined;
     if (touchesUnits || defaultUnitLabel !== undefined) {
-      const product = await ctx.db.get(id);
-      if (!product) throw new Error("Product not found");
-
       // Whichever half the caller left out stays as it is. The invariants
       // below therefore always check the product's resulting state.
       const nextUnits = units ?? product.units;

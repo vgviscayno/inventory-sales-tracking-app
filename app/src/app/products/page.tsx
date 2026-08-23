@@ -10,6 +10,7 @@ import {
 } from "../../../convex/remainderReading";
 import { ArchivedSection } from "../ArchivedSection";
 import { StockStatusPill } from "../StockStatusPill";
+import { thresholdFieldWording } from "./lowStockThresholdField";
 import { ReadingLadderField } from "./ReadingLadderField";
 
 export default function ProductsPage() {
@@ -57,6 +58,16 @@ export default function ProductsPage() {
     baseUnitLabel.trim(),
     ...extraUnits.map((u) => u.label.trim()),
   ].filter(Boolean);
+
+  // The threshold box counts the Default unit this form is about to send. That
+  // is the Base unit while nothing else is nominated.
+  // A blank Base unit leaves the wording generic. The form is unsubmittable
+  // until it is typed, so nothing saves against the placeholder wording.
+  const thresholdWording = thresholdFieldWording(
+    (unitLabels.includes(defaultUnitLabel)
+      ? defaultUnitLabel
+      : baseUnitLabel.trim()) || "unit",
+  );
 
   const canAdd =
     name.trim() &&
@@ -159,7 +170,7 @@ export default function ProductsPage() {
       defaultUnitLabel: unitLabels.includes(defaultUnitLabel)
         ? defaultUnitLabel
         : undefined,
-      lowStockThreshold: lowStockThreshold
+      lowStockThresholdInDefaultUnits: lowStockThreshold
         ? Number(lowStockThreshold)
         : undefined,
       // Keys become labels here, and only here. Nothing ticked sends nothing at
@@ -393,14 +404,14 @@ export default function ProductsPage() {
               htmlFor="product-low-stock-threshold"
               className="text-sub block text-[13px] mb-1"
             >
-              Low-stock threshold override (optional)
+              {thresholdWording.label}
             </label>
             <input
               id="product-low-stock-threshold"
               type="number"
               value={lowStockThreshold}
               onChange={(e) => setLowStockThreshold(e.target.value)}
-              placeholder="Uses global default"
+              placeholder={thresholdWording.placeholder}
               className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
             />
           </div>

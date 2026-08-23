@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { thresholdToBaseUnits } from "../../../../convex/lowStockThreshold";
 import {
   buildReadingLadder,
   formatReading,
@@ -15,13 +16,17 @@ import {
   selectableDenominations,
   type Unit,
 } from "../../../../convex/remainderReading";
-import { unitLabelFor } from "../../../../convex/unitLabels";
+import { formatCount, unitLabelFor } from "../../../../convex/unitLabels";
 import { formatTime, signed } from "../../format";
 import { DeliverySheet } from "../../movements/DeliverySheet";
 import { PulloutSheet } from "../../movements/PulloutSheet";
 import { SaleEntrySheet } from "../../movements/SaleEntrySheet";
 import { StockStatusPill } from "../../StockStatusPill";
 import { WindowedDayList } from "../../WindowedDayList";
+import {
+  draftAfterSave,
+  thresholdFieldWording,
+} from "../lowStockThresholdField";
 import { ReadingLadderField } from "../ReadingLadderField";
 
 // This type derives from the query and does not restate it. A new field, or a
@@ -87,8 +92,14 @@ function ProductForm({ product }: { product: Product }) {
   // The picker below never appears, and this value stays null.
   const savedDefault =
     product.units.length > 1 ? product.defaultUnit.label : null;
+  // The threshold in the Default unit, which is the unit the field is labelled
+  // with. The row stores Base units, and `withStatus` divides. See
+  // `thresholdToBaseUnits` in products.ts.
   const savedThreshold =
-    product.lowStockThreshold != null ? String(product.lowStockThreshold) : "";
+    product.lowStockThresholdInDefaultUnits != null
+      ? String(product.lowStockThresholdInDefaultUnits)
+      : "";
+  const thresholdWording = thresholdFieldWording(product.defaultUnit.label);
   const savedDenominationLabels = product.denominationLabels ?? [];
 
   const [name, setName] = useState(savedName);
@@ -293,7 +304,16 @@ function ProductForm({ product }: { product: Product }) {
         ...(defaultDirty
           ? { defaultUnitLabel: defaultUnitLabel?.trim() ?? null }
           : {}),
-        lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : null,
+        // Only a touched field is sent. A save that moves the Default unit and
+        // leaves this box alone must not restate the threshold against the new
+        // unit. That would silently change how much stock it stands for.
+        ...(thresholdDirty
+          ? {
+              lowStockThresholdInDefaultUnits: lowStockThreshold
+                ? Number(lowStockThreshold)
+                : null,
+            }
+          : {}),
         ...(readingDirty ? { denominationLabels } : {}),
       });
       // Set the local drafts to exactly what the reactive query hands back.
@@ -315,9 +335,6 @@ function ProductForm({ product }: { product: Product }) {
         })),
       );
       setBaseUnitLabel(baseUnitTrimmed);
-      setLowStockThreshold(
-        lowStockThreshold ? String(Number(lowStockThreshold)) : "",
-      );
       // The Default unit's resulting stored value. It is what the save sent if
       // the Default unit moved. Otherwise it is the product's own value, unless
       // this edit removed that Unit, which the mutation clears. See
@@ -331,14 +348,28 @@ function ProductForm({ product }: { product: Product }) {
             parsedUnits.some((u) => u.label === product.defaultUnitLabel)
           ? product.defaultUnitLabel
           : null;
+      // The Default unit object the product now leads with. The threshold box
+      // is denominated against it, so both drafts resolve it once.
+      const nextDefaultUnit =
+        parsedUnits.find(
+          (u) => u.label === (nextStoredDefault ?? baseUnitTrimmed),
+        ) ?? parsedUnits[0];
       setDefaultUnitLabel(
-        parsedUnits.length <= 1
-          ? null
-          : (
-              parsedUnits.find(
-                (u) => u.label === (nextStoredDefault ?? baseUnitTrimmed),
-              ) ?? parsedUnits[0]
-            ).label,
+        parsedUnits.length <= 1 ? null : nextDefaultUnit.label,
+      );
+      // The threshold's resulting stored value, in Base units. A dirty box
+      // went to the server and converted against the Default unit the product
+      // led with. An untouched box left the row where it was.
+      const nextStoredThreshold = thresholdDirty
+        ? lowStockThreshold
+          ? thresholdToBaseUnits(Number(lowStockThreshold), product.defaultUnit)
+          : undefined
+        : product.lowStockThreshold;
+      // The box re-denominates with the Default unit. A save that moved the
+      // Default unit therefore leaves the box standing for the same stock. See
+      // `draftAfterSave`.
+      setLowStockThreshold(
+        draftAfterSave(nextStoredThreshold, nextDefaultUnit),
       );
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -429,10 +460,17 @@ function ProductForm({ product }: { product: Product }) {
           onReset={resetUnits}
         />
         <DiffField
-          label="Low-stock threshold override (optional)"
+          label={thresholdWording.label}
           htmlFor="edit-low-stock-threshold"
           dirty={thresholdDirty}
-          was={savedThreshold || "global default"}
+          was={
+            product.lowStockThresholdInDefaultUnits != null
+              ? formatCount(
+                  product.lowStockThresholdInDefaultUnits,
+                  product.defaultUnit.label,
+                )
+              : "shop default"
+          }
           onReset={() => setLowStockThreshold(savedThreshold)}
         >
           <input
@@ -440,7 +478,7 @@ function ProductForm({ product }: { product: Product }) {
             type="number"
             value={lowStockThreshold}
             onChange={(e) => setLowStockThreshold(e.target.value)}
-            placeholder="Uses global default"
+            placeholder={thresholdWording.placeholder}
             className={fieldInputClass(thresholdDirty)}
           />
         </DiffField>
