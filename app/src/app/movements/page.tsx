@@ -2,19 +2,26 @@
 
 import { useQuery } from "convex/react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { formatTime, signed } from "../format";
+import { formatTime } from "../format";
 import { WindowedDayList } from "../WindowedDayList";
 import { DeliverySheet } from "./DeliverySheet";
+import { formatProductReading, readEntryByProduct } from "./entryReading";
 import { PulloutSheet } from "./PulloutSheet";
 import { SaleEntrySheet } from "./SaleEntrySheet";
 import { type TypeFilter, useMovementsFilter } from "./useMovementsFilter";
 
 const HEADER_H = 30;
-const ROW_H = 54;
 const VIEWPORT_H = 520;
+
+// A row's height, in the parts it is built from. `WindowedDayList` places every
+// row by these figures. The markup takes its own sizes from the same three
+// constants, so the drawn row and its slot cannot drift apart.
+const ROW_PAD = 16;
+const ROW_HEAD_H = 32;
+const ROW_PRODUCT_H = 20;
 
 type Entry =
   | ({ kind: "delivery" } & ReturnType<typeof useDeliveries>[number])
@@ -74,6 +81,22 @@ export default function MovementsPage() {
           : []),
       ].sort((a, b) => b.createdAt - a.createdAt),
     [showDeliveries, deliveries, showPullouts, pullouts, includeSales, sales],
+  );
+
+  // One reading per Entry, shared by the row's height and the row's markup. A
+  // second call could give a different product count, and the height would then
+  // describe a row the list did not draw.
+  const readings = useMemo(
+    () => new Map(entries.map((e) => [e._id, readEntryByProduct(e.lines)])),
+    [entries],
+  );
+
+  const rowHeight = useCallback(
+    (entry: Entry) =>
+      ROW_PAD +
+      ROW_HEAD_H +
+      (readings.get(entry._id)?.length ?? 0) * ROW_PRODUCT_H,
+    [readings],
   );
 
   // This state names which sheet is open, if any. A sheet either logs a fresh
@@ -150,9 +173,16 @@ export default function MovementsPage() {
       <WindowedDayList
         rows={entries}
         headerH={HEADER_H}
-        rowH={ROW_H}
+        rowH={rowHeight}
         viewportH={VIEWPORT_H}
         empty={emptyMessage(typeFilter, includeSales)}
+        // A day spans products, and no one figure covers them. A count of the
+        // Entries is what the heading can say and mean.
+        renderDayFigure={({ rows }) => (
+          <span className="text-sub">
+            {rows.length} {rows.length === 1 ? "entry" : "entries"}
+          </span>
+        )}
         renderRow={(entry) => (
           <button
             type="button"
@@ -163,33 +193,43 @@ export default function MovementsPage() {
                 entryId: entry._id,
               })
             }
-            className="flex h-full w-full items-center justify-between px-3 text-left"
+            className="block h-full w-full px-3 text-left"
+            style={{ paddingBlock: ROW_PAD / 2 }}
           >
-            <div className="min-w-0">
-              <div className="truncate text-[14px] font-semibold">
+            <div
+              className="flex items-baseline justify-between gap-2"
+              style={{ height: ROW_HEAD_H }}
+            >
+              <span className="truncate text-[14px] font-semibold">
                 {entry.kind === "delivery" && "Delivery"}
                 {entry.kind === "pullout" && "Pull-out"}
                 {entry.kind === "sale" && "Sale"}
-              </div>
-              <div className="text-sub truncate text-[11px]">
+              </span>
+              <span className="text-sub shrink-0 text-[11px]">
                 {formatTime(entry.createdAt)}
                 {entry.kind === "pullout" && ` · ${entry.reasonCategory}`}
                 {entry.kind === "sale" &&
                   ` · ${entry.paymentMethod}${
                     entry.customerName ? ` · ${entry.customerName}` : ""
-                  }`}{" "}
-                · {entry.lines.length} product
-                {entry.lines.length === 1 ? "" : "s"} ·{" "}
-                {entry.lines.map((l) => l.productName).join(", ")}
+                  }`}
+              </span>
+            </div>
+            {(readings.get(entry._id) ?? []).map((reading) => (
+              <div
+                key={reading.productId}
+                className="flex items-baseline justify-between gap-3 text-[13px]"
+                style={{ height: ROW_PRODUCT_H }}
+              >
+                <span className="truncate">{reading.productName}</span>
+                <span
+                  className={`shrink-0 font-bold ${
+                    entry.kind === "delivery" ? "text-accent" : "text-danger"
+                  }`}
+                >
+                  {formatProductReading(reading)}
+                </span>
               </div>
-            </div>
-            <div
-              className={`shrink-0 pl-3 text-right font-bold ${
-                entry.kind === "delivery" ? "text-accent" : "text-danger"
-              }`}
-            >
-              {signed(entry.netChange)}
-            </div>
+            ))}
           </button>
         )}
       />
