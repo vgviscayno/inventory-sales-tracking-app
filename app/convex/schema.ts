@@ -31,6 +31,10 @@ export default defineSchema({
     // back to the Base unit. Absence is not a case of its own.
     defaultUnitLabel: v.optional(v.string()),
     quantityOnHand: v.number(),
+    // This product's own Low-stock threshold, in Base units. An absent value
+    // means the shop-wide `appSettings.lowStockThreshold` stands in.
+    // The shopkeeper enters and reads this number in the Default unit. See
+    // lowStockThreshold.ts, and "Low-stock threshold" in CONTEXT.md.
     lowStockThreshold: v.optional(v.number()),
     // The Reading ladder. It names which of this product's Units the stock
     // reads in. The stock then reads "3 cases, 5 pcs" instead of "1085 pcs".
@@ -81,6 +85,10 @@ export default defineSchema({
   }).index("by_customer", ["customerId"]),
 
   appSettings: defineTable({
+    // The shop-wide Low-stock threshold, counted in each product's own Default
+    // unit and not in Base units. A Base-unit reading would compare ten grams
+    // of rice against ten eggs. The rice warning would never fire. See
+    // "Low-stock threshold" in CONTEXT.md.
     lowStockThreshold: v.number(),
   }),
 
