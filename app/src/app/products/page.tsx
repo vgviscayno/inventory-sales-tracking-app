@@ -451,8 +451,12 @@ export default function ProductsPage() {
               never sees it, because its stock reads the plain way either
               way. */}
           {denominations.length > 0 && (
-            <div>
-              <span className="text-sub block text-[13px] mb-1">
+            /* A bounded block, like the threshold below it. Two runs of small
+               pill-shaped controls one under the other read as one field
+               otherwise. The boundary, and not the spacing, is what says where
+               one field stops. */
+            <div className="rounded-xl border border-line p-2.5">
+              <span className="mb-1.5 block text-[13px] font-semibold">
                 Read stock in
               </span>
               <ReadingLadderField
