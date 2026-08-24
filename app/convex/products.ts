@@ -3,7 +3,8 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { filterLifecycle } from "./lifecycle";
 import {
-  thresholdInDefaultUnits,
+  resolveThresholdUnit,
+  thresholdInUnits,
   thresholdToBaseUnits,
 } from "./lowStockThreshold";
 import { formatStock } from "./remainderReading";
@@ -107,6 +108,33 @@ function validateDefaultUnit(
 }
 
 /**
+ * The threshold's Unit is optional, and it must be a real Unit. It also cannot
+ * arrive without the threshold it counts.
+ * The second rule is structural and not a convention each caller remembers.
+ * The number and its Unit are written together and cleared together. A caller
+ * that clears one clears both. A label alone is a Unit that counts nothing.
+ * See "Low-stock threshold" in CONTEXT.md.
+ */
+function validateThresholdUnit(
+  units: { label: string }[],
+  thresholdInUnits: number | null | undefined,
+  thresholdUnitLabel: string | null | undefined,
+) {
+  if (thresholdUnitLabel == null) return;
+  if (thresholdInUnits == null) {
+    throw new Error(
+      `Low-stock threshold Unit "${thresholdUnitLabel}" counts nothing — ` +
+        "a threshold's Unit is set and cleared with the threshold itself",
+    );
+  }
+  if (!units.some((u) => u.label === thresholdUnitLabel)) {
+    throw new Error(
+      `Low-stock threshold Unit "${thresholdUnitLabel}" is not one of the Units`,
+    );
+  }
+}
+
+/**
  * The Default unit object a product resolves to. `resolveDefaultUnitLabel`
  * gives only the label.
  * `withStatus` attaches this object to every product a reader gets. The price a
@@ -141,6 +169,7 @@ function withStatus<
   T extends {
     quantityOnHand: number;
     lowStockThreshold?: number;
+    lowStockThresholdUnitLabel?: string;
     archivedAt?: number;
     units: { label: string; baseEquivalent: number; price: number }[];
     baseUnitLabel: string;
@@ -148,23 +177,33 @@ function withStatus<
   },
 >(product: T, globalThreshold: number) {
   const defaultUnit = resolveDefaultUnit(product);
-  // The stored override read back in the Default unit. The form shows this
-  // number, so the shopkeeper reads "5" where she typed "5". See
-  // lowStockThreshold.ts.
-  const lowStockThresholdInDefaultUnits =
+  // The Unit this product's own threshold is counted in. A threshold that
+  // names none, and one that names a Unit already gone, both read in the
+  // Default unit. See `resolveThresholdUnit`.
+  const lowStockThresholdUnit = resolveThresholdUnit(
+    product.units,
+    product.lowStockThresholdUnitLabel,
+    defaultUnit,
+  );
+  // The stored override read back in that Unit. The form shows this number, so
+  // the shopkeeper reads "5" where she typed "5". See lowStockThreshold.ts.
+  const lowStockThresholdInUnits =
     product.lowStockThreshold === undefined
       ? undefined
-      : thresholdInDefaultUnits(product.lowStockThreshold, defaultUnit);
+      : thresholdInUnits(product.lowStockThreshold, lowStockThresholdUnit);
   if (product.archivedAt !== undefined) {
     return {
       ...product,
       lowStockStatus: undefined,
-      lowStockThresholdInDefaultUnits,
+      lowStockThresholdInUnits,
+      lowStockThresholdUnit,
       defaultUnit,
     };
   }
-  // The per-product override already stores Base units. The shop-wide number
-  // counts Default units, so it converts here, on every read.
+  // The per-product override already stores Base units, so the comparison
+  // below is Base units against Base units and the threshold's own Unit never
+  // enters it. The shop-wide number counts Default units, so that one converts
+  // here, on every read.
   const threshold =
     product.lowStockThreshold ?? globalThreshold * defaultUnit.baseEquivalent;
   const lowStockStatus =
@@ -176,7 +215,8 @@ function withStatus<
   return {
     ...product,
     lowStockStatus,
-    lowStockThresholdInDefaultUnits,
+    lowStockThresholdInUnits,
+    lowStockThresholdUnit,
     defaultUnit,
   };
 }
@@ -237,11 +277,15 @@ export const create = mutation({
     units: v.array(unitValidator),
     baseUnitLabel: v.string(),
     defaultUnitLabel: v.optional(v.string()),
-    // The per-product threshold, counted in the Default unit this call names.
-    // The row stores Base units under `lowStockThreshold`. The arg spells its
-    // own denomination out. The two numbers differ by a factor nobody can see
-    // at the call site. See lowStockThreshold.ts.
-    lowStockThresholdInDefaultUnits: v.optional(v.number()),
+    // The per-product threshold, counted in the Unit `lowStockThresholdUnitLabel`
+    // names. The row stores Base units under `lowStockThreshold`. The arg
+    // spells its own denomination out. The two numbers differ by a factor
+    // nobody can see at the call site. See lowStockThreshold.ts.
+    lowStockThresholdInUnits: v.optional(v.number()),
+    // Which Unit that number counts. It must be one of `units`, and it cannot
+    // come without a number. An omitted label counts the Default unit, which
+    // is what the form preselects. See `validateThresholdUnit`.
+    lowStockThresholdUnitLabel: v.optional(v.string()),
     // The Reading ladder, with the same posture as in `update`. The row stores
     // the labels as given, and every read resolves them. Nothing here therefore
     // has to keep step with a later Unit rename or removal.
@@ -256,24 +300,41 @@ export const create = mutation({
       units,
       baseUnitLabel,
       defaultUnitLabel,
-      lowStockThresholdInDefaultUnits,
+      lowStockThresholdInUnits,
+      lowStockThresholdUnitLabel,
       ...args
     },
   ) => {
     validateUnits(units, baseUnitLabel);
     validateDefaultUnit(units, defaultUnitLabel);
+    validateThresholdUnit(
+      units,
+      lowStockThresholdInUnits,
+      lowStockThresholdUnitLabel,
+    );
     return await ctx.db.insert("products", {
       ...args,
       units,
       baseUnitLabel,
       defaultUnitLabel,
       lowStockThreshold:
-        lowStockThresholdInDefaultUnits === undefined
+        lowStockThresholdInUnits === undefined
           ? undefined
           : thresholdToBaseUnits(
-              lowStockThresholdInDefaultUnits,
-              resolveDefaultUnit({ units, baseUnitLabel, defaultUnitLabel }),
+              lowStockThresholdInUnits,
+              resolveThresholdUnit(
+                units,
+                lowStockThresholdUnitLabel,
+                resolveDefaultUnit({ units, baseUnitLabel, defaultUnitLabel }),
+              ),
             ),
+      // The pair travels together. A number with no label reads in the Default
+      // unit, and `validateThresholdUnit` has already refused a label with no
+      // number.
+      lowStockThresholdUnitLabel:
+        lowStockThresholdInUnits === undefined
+          ? undefined
+          : lowStockThresholdUnitLabel,
       quantityOnHand: 0,
     });
   },
@@ -303,14 +364,22 @@ export const update = mutation({
     // `undefined` arg before the mutation runs, so `undefined` cannot mean
     // "clear".
     defaultUnitLabel: v.optional(v.union(v.string(), v.null())),
-    // The per-product threshold, counted in the Default unit the product leads
-    // with right now. A Default unit this same call nominates does not
-    // denominate it. The form the number came from carried the old label. See
-    // lowStockThreshold.ts.
-    // `null` clears the override back to the shop-wide default. An omitted
-    // value leaves the stored value untouched. Convex drops an `undefined` arg
-    // before the mutation runs, so `undefined` cannot mean "clear".
-    lowStockThresholdInDefaultUnits: v.optional(v.union(v.number(), v.null())),
+    // The per-product threshold, counted in the Unit
+    // `lowStockThresholdUnitLabel` names, or in the one the product's stored
+    // threshold already names. A Default unit this same call nominates does
+    // not denominate it. See lowStockThreshold.ts.
+    // `null` clears the override back to the shop-wide default, and takes the
+    // Unit with it. An omitted value leaves the stored value untouched. Convex
+    // drops an `undefined` arg before the mutation runs, so `undefined` cannot
+    // mean "clear".
+    lowStockThresholdInUnits: v.optional(v.union(v.number(), v.null())),
+    // Which Unit that number counts. It must be one of the Units this call
+    // leaves behind, so a Unit added in this same save can denominate the
+    // threshold typed beside it.
+    // It cannot travel without a number: `validateThresholdUnit` refuses a
+    // label alone. A threshold is cleared and re-denominated as one edit, and
+    // never relabelled on its own.
+    lowStockThresholdUnitLabel: v.optional(v.string()),
     // The Reading ladder. An empty array is the clear, because an empty ladder
     // already means the plain reading. This field therefore needs no `null`,
     // unlike the two fields above. An explicit value always wins, and an
@@ -329,7 +398,8 @@ export const update = mutation({
       units,
       baseUnitLabel,
       defaultUnitLabel,
-      lowStockThresholdInDefaultUnits,
+      lowStockThresholdInUnits,
+      lowStockThresholdUnitLabel,
       denominationLabels,
     },
   ) => {
@@ -345,29 +415,52 @@ export const update = mutation({
       baseUnitLabel?: string;
       defaultUnitLabel?: string;
       lowStockThreshold?: number;
+      lowStockThresholdUnitLabel?: string;
       denominationLabels?: string[];
     } = {};
     if (name !== undefined) patch.name = name;
-    if (lowStockThresholdInDefaultUnits !== undefined) {
-      patch.lowStockThreshold =
-        lowStockThresholdInDefaultUnits === null
-          ? undefined
-          : thresholdToBaseUnits(
-              lowStockThresholdInDefaultUnits,
-              resolveDefaultUnit(product),
-            );
-    }
     if (denominationLabels !== undefined) {
       patch.denominationLabels = denominationLabels;
     }
 
+    // Whichever half the caller left out stays as it is. Every invariant below
+    // therefore checks the product's resulting state, and the threshold can
+    // name a Unit this same call adds.
+    const nextUnits = units ?? product.units;
+    const nextBaseUnitLabel = baseUnitLabel ?? product.baseUnitLabel;
+
+    validateThresholdUnit(
+      nextUnits,
+      lowStockThresholdInUnits,
+      lowStockThresholdUnitLabel,
+    );
+    if (lowStockThresholdInUnits !== undefined) {
+      // The Unit this number counts: the one this call names, or the one the
+      // stored threshold already names. A caller that moves the number and
+      // leaves the Unit alone therefore re-enters against the denomination its
+      // form was showing.
+      const thresholdUnit = resolveThresholdUnit(
+        nextUnits,
+        lowStockThresholdUnitLabel ?? product.lowStockThresholdUnitLabel,
+        resolveDefaultUnit(product),
+      );
+      patch.lowStockThreshold =
+        lowStockThresholdInUnits === null
+          ? undefined
+          : thresholdToBaseUnits(lowStockThresholdInUnits, thresholdUnit);
+      // The Unit is a property of a threshold and not of the product. A
+      // cleared number therefore clears it too.
+      // A number with no label keeps the Unit the stored threshold names. It
+      // must be the Unit the conversion above used. The row would otherwise
+      // convert in against the tray and read back in the Default unit.
+      patch.lowStockThresholdUnitLabel =
+        lowStockThresholdInUnits === null
+          ? undefined
+          : (lowStockThresholdUnitLabel ?? product.lowStockThresholdUnitLabel);
+    }
+
     const touchesUnits = units !== undefined || baseUnitLabel !== undefined;
     if (touchesUnits || defaultUnitLabel !== undefined) {
-      // Whichever half the caller left out stays as it is. The invariants
-      // below therefore always check the product's resulting state.
-      const nextUnits = units ?? product.units;
-      const nextBaseUnitLabel = baseUnitLabel ?? product.baseUnitLabel;
-
       if (touchesUnits) {
         // This call rejects an empty list, a duplicate label, and a blank
         // label. It rejects a Base equivalent or a price that is not whole or
@@ -417,6 +510,19 @@ export const update = mutation({
       ) {
         patch.defaultUnitLabel = undefined;
       }
+    }
+
+    // The same rule for the threshold's Unit, and the number stays. 150 eggs
+    // are still 150 eggs; they only stop reading as 5 trays. A threshold this
+    // call re-denominated has already validated its own label against
+    // `nextUnits`, so it is not in question here.
+    if (
+      patch.lowStockThresholdUnitLabel === undefined &&
+      lowStockThresholdInUnits === undefined &&
+      product.lowStockThresholdUnitLabel !== undefined &&
+      !nextUnits.some((u) => u.label === product.lowStockThresholdUnitLabel)
+    ) {
+      patch.lowStockThresholdUnitLabel = undefined;
     }
 
     await ctx.db.patch(id, patch);
