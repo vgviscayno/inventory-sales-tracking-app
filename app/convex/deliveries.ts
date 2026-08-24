@@ -1,8 +1,43 @@
-import { v } from "convex/values";
+import { type Infer, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import { resolveDefaultUnitLabel } from "./products";
+import { roundCentavos } from "./money";
+import { resolveDefaultUnitLabel, validateUnits } from "./products";
+import { unitValidator } from "./schema";
 import { entryLines, recordMovement } from "./stockMovements";
+
+// One Unit a Line declares beside its Base unit. It is the schema's own Unit
+// with the price made optional. A new field on a Unit therefore still needs
+// one declaration. See `unitValidator` in schema.ts and `newProductUnits`.
+const declaredUnitValidator = unitValidator
+  .omit("price")
+  .extend({ price: v.optional(v.number()) });
+
+/**
+ * The Units a `kind: "new"` Line's product is born with. The Base unit comes
+ * first, then whatever Units the Line declares beside it.
+ * A second Unit's price is optional on the Line and required on the product.
+ * The Base unit's price therefore stands in, at that Unit's Base equivalent.
+ * A piece at 8 makes a tray of 30 come to 240.
+ * The shopkeeper gets the arithmetic she would have done. She does not get a
+ * Unit the product form later refuses to save. The step shows her the figure.
+ * The build and the validation live here, so the check before the write and
+ * the write itself read the same Unit list.
+ */
+function newProductUnits(line: {
+  unitLabel: string;
+  price: number;
+  extraUnits?: Infer<typeof declaredUnitValidator>[];
+}) {
+  return [
+    { label: line.unitLabel.trim(), baseEquivalent: 1, price: line.price },
+    ...(line.extraUnits ?? []).map((u) => ({
+      label: u.label.trim(),
+      baseEquivalent: u.baseEquivalent,
+      price: u.price ?? roundCentavos(line.price * u.baseEquivalent),
+    })),
+  ];
+}
 
 export const create = mutation({
   args: {
@@ -28,12 +63,22 @@ export const create = mutation({
         v.object({
           kind: v.literal("new"),
           name: v.string(),
-          // The single Unit this quick-created product starts with, which is
-          // its Base unit. Nothing offers a default here either. A plausible
-          // default is how a product ends up based in the wrong Unit. See
+          // The Unit this quick-created product is based in. Nothing offers a
+          // default here either. A plausible default is how a product ends up
+          // based in the wrong Unit. See
           // docs/adr/0004-base-unit-locked.md.
           unitLabel: v.string(),
           price: v.number(),
+          // The Units the product carries beside its Base unit. A shipment
+          // arrives in bulk, so a product based in the piece is still received
+          // as "10 trays". The Line that creates it therefore declares the
+          // tray here, and names it below.
+          // Each price is optional. See `newProductUnits`.
+          extraUnits: v.optional(v.array(declaredUnitValidator)),
+          // Which of this product's Units the `quantity` below counts. It must
+          // name the Base unit or one of `extraUnits`. An omitted value counts
+          // the Base unit, which is what a single-Unit Line means.
+          quantityUnitLabel: v.optional(v.string()),
           quantity: v.number(),
         }),
       ),
@@ -51,12 +96,20 @@ export const create = mutation({
         throw new Error("Each delivery line must have a positive quantity");
       }
       if (line.kind === "new") {
+        if (!line.name.trim()) {
+          throw new Error("A new product needs a name");
+        }
         if (!line.unitLabel.trim()) {
-          throw new Error("A new product needs a Unit label");
+          throw new Error("A new product needs a Base unit");
         }
         if (line.price <= 0) {
           throw new Error("A new product needs a positive price");
         }
+        // The rest of the Unit rules hold here: a label on every Unit, no two
+        // Units on one label, and a whole positive Base equivalent. A second
+        // Unit that repeats the Base unit's label is the one this catches most
+        // often.
+        validateUnits(newProductUnits(line), line.unitLabel.trim());
       }
     }
 
@@ -80,13 +133,17 @@ export const create = mutation({
         if (!product) throw new Error("Product not found");
         unitLabel = line.unitLabel ?? resolveDefaultUnitLabel(product);
       } else {
-        unitLabel = line.unitLabel;
+        const units = newProductUnits(line);
+        const baseUnitLabel = line.unitLabel.trim();
         productId = await ctx.db.insert("products", {
-          name: line.name,
-          units: [{ label: unitLabel, baseEquivalent: 1, price: line.price }],
-          baseUnitLabel: unitLabel,
+          name: line.name.trim(),
+          units,
+          baseUnitLabel,
           quantityOnHand: 0,
         });
+        // `recordMovement` resolves this label against the Units above, and
+        // refuses one that names none of them. No check here repeats that.
+        unitLabel = line.quantityUnitLabel?.trim() || baseUnitLabel;
       }
       await recordMovement(ctx, {
         type: "delivery",
