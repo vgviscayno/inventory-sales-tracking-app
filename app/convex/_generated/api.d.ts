@@ -11,6 +11,7 @@
 import type * as customers from "../customers.js";
 import type * as deliveries from "../deliveries.js";
 import type * as lifecycle from "../lifecycle.js";
+import type * as lowStockThreshold from "../lowStockThreshold.js";
 import type * as money from "../money.js";
 import type * as negativeProjections from "../negativeProjections.js";
 import type * as payments from "../payments.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   customers: typeof customers;
   deliveries: typeof deliveries;
   lifecycle: typeof lifecycle;
+  lowStockThreshold: typeof lowStockThreshold;
   money: typeof money;
   negativeProjections: typeof negativeProjections;
   payments: typeof payments;
