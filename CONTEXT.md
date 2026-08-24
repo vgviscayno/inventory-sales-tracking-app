@@ -9,7 +9,7 @@ A way a product can be counted and transacted — `piece`, `tray`, `sack`. Every
 _Avoid_: measure, UOM, packaging
 
 **Base unit**:
-The single Unit a product's stock is counted in. Every quantity the app holds about that product's stock — how much is on hand, the threshold at which it reads as low — is expressed in it, and so is the shop-wide threshold, which is compared against a product's quantity on hand as it stands. Which Unit plays this role is a decision recorded per product, not inferred from the Units themselves.
+The single Unit a product's stock is counted in. Every quantity the app holds about that product's stock — how much is on hand, the Low-stock threshold set on it — is expressed in it. Which Unit plays this role is a decision recorded per product, not inferred from the Units themselves.
 _Avoid_: piece (that is one product's Base unit, not the concept), smallest unit, primary unit
 
 **Base equivalent**:
@@ -17,8 +17,12 @@ How many Base units one of a given Unit amounts to — 1 for the Base unit itsel
 _Avoid_: conversion factor (silent about direction), multiplier, ratio
 
 **Default unit**:
-The Unit a product leads with — the one its price is quoted in on listings, and the one preselected when someone logs a movement against it. A separate decision from the Base unit, because what a product is counted in and what it usually changes hands in need not be the same. Where no choice is recorded, the Base unit stands in. It has no bearing on the low-stock threshold, which is counted in Base units whether it is the shop-wide one or one set on the product itself.
+The Unit a product leads with — the one its price is quoted in on listings, and the one preselected when someone logs a movement against it. A separate decision from the Base unit, because what a product is counted in and what it usually changes hands in need not be the same. Where no choice is recorded, the Base unit stands in. It is also the Unit the shop-wide Low-stock threshold counts, and the Unit a product's own threshold is preselected against when one is first set.
 _Avoid_: primary unit, main unit (both blur into Base unit)
+
+**Low-stock threshold**:
+The count at or below which a product reads as low. A threshold names the Unit it is counted in — "warn me on Eggs Medium under 10 trays" — chosen from that product's own Units and separate from the one it sells in, so a product quoted by the piece can still be watched by the tray. The Unit belongs to the threshold rather than to the product: the two are set together and cleared together, and the Unit is only ever a way of reading the count. The app holds the count in Base units, so what a later change moves is the reading and never the number. Change what a tray amounts to and the threshold is still 300 eggs, now read as 15 trays. Take the tray off the product and the same 300 eggs read in its Default unit. A product may carry its own threshold; where it does not, the shop-wide threshold stands in, and that one number is read as a count of each product's own Default unit, so a single `10` means "under ten of however I sell it" on every product at once. A negative count is not low but wrong, and reads as its own status. An archived product carries no status at all.
+_Avoid_: reorder point, par level, minimum stock, safety stock (each names a stock-control practice the shop does not run)
 
 **Remainder reading**:
 Reading a stock figure against a Reading ladder — a whole count of each Denomination on the ladder in turn, with what is left over falling to the next: "3 cases, 5 pcs" rather than "1085 pcs". A Denomination that comes to zero is not spoken. Whether a product's figures read this way is a per-product choice, and it applies to all of them at once, so a product never mixes the two readings across a screen. It is a way of reading a quantity, never a way of holding one.

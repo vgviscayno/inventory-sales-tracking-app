@@ -680,3 +680,481 @@ test("a product can be created with a Reading ladder already set", async () => {
     denominationLabels: ["tray"],
   });
 });
+
+// The tests below cover the Low-stock threshold. A shopkeeper enters and reads
+// it in a Unit she names. The row holds it in Base units. The split stops a
+// later change to that Unit from reinterpreting a stored number. See
+// "Low-stock threshold" in CONTEXT.md.
+
+test("a per-product threshold naming no Unit is entered in the Default unit and stored in Base units", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+    // "Warn me under 5 trays", which is 150 pieces.
+    lowStockThresholdInUnits: 5,
+  });
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 4 },
+    ],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 120,
+    lowStockThreshold: 150,
+    lowStockThresholdInUnits: 5,
+    lowStockStatus: "low",
+  });
+});
+
+test("a threshold set through update naming no Unit is entered in the Default unit too", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+  });
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 6 },
+    ],
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    lowStockThresholdInUnits: 5,
+  });
+
+  // Six trays is over five, so the warning stays off.
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 180,
+    lowStockThreshold: 150,
+    lowStockStatus: "ok",
+  });
+});
+
+test("changing the Default unit afterwards leaves the stored threshold worth the same stock", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+    lowStockThresholdInUnits: 5,
+  });
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 4 },
+    ],
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    defaultUnitLabel: "piece",
+  });
+
+  // The threshold is still 150 pieces. It did not become five pieces, which
+  // would have turned the warning off over 120 on the shelf.
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockThreshold: 150,
+    lowStockThresholdInUnits: 150,
+    lowStockStatus: "low",
+  });
+});
+
+test("the shop-wide threshold counts in each product's own Default unit", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+  });
+  // Ten trays, which is exactly the shop-wide 10 read in this product's
+  // Default unit. Ten pieces would never fire the warning on a product this
+  // size.
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 10 },
+    ],
+  });
+  const coke = await aProductHolding(t, 10);
+
+  const withoutOverride = await t.query(api.products.get, { id: eggs });
+  expect(withoutOverride).toMatchObject({
+    quantityOnHand: 300,
+    lowStockStatus: "low",
+  });
+  expect(withoutOverride?.lowStockThresholdInUnits).toBe(undefined);
+  // The same shop-wide 10 against a product whose Default unit is its Base
+  // unit. One number, two dimensionally sound readings.
+  expect(await t.query(api.products.get, { id: coke })).toMatchObject({
+    lowStockStatus: "low",
+  });
+});
+
+test("a count over the shop-wide threshold read in trays is not low", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+  });
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 11 },
+    ],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 330,
+    lowStockStatus: "ok",
+  });
+});
+
+// A negative count is also `<= threshold`, and a threshold denominated in
+// trays makes the overlap wider. The negative case must still win.
+test("a negative count reads as negative under a threshold entered in trays", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+    lowStockThresholdInUnits: 5,
+  });
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 1 },
+    ],
+  });
+
+  await t.mutation(api.sales.create, {
+    paymentMethod: "cash",
+    items: [{ productId: eggs, unitLabel: "tray", quantity: 2 }],
+    allowNegative: true,
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: -30,
+    lowStockStatus: "negative",
+  });
+});
+
+test("an archived product carries no low-stock status under a per-product threshold", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+    lowStockThresholdInUnits: 5,
+  });
+  await t.mutation(api.products.archive, { id: eggs });
+
+  expect((await t.query(api.products.get, { id: eggs }))?.lowStockStatus).toBe(
+    undefined,
+  );
+});
+
+test("clearing a per-product override falls back to the shop-wide threshold", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+    lowStockThresholdInUnits: 5,
+  });
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 8 },
+    ],
+  });
+
+  // Eight trays clears an override of five, and falls under the shop-wide ten.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    lowStockThresholdInUnits: null,
+  });
+
+  const cleared = await t.query(api.products.get, { id: eggs });
+  expect(cleared).toMatchObject({ lowStockStatus: "low" });
+  expect(cleared?.lowStockThreshold).toBe(undefined);
+  expect(cleared?.lowStockThresholdInUnits).toBe(undefined);
+});
+
+test("a threshold entered in a Default unit that does not divide it reads back the number entered", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "tray",
+    // Half a tray is 15 pieces. A threshold is a quantity, and the shop sells
+    // fractions of a tray, so nothing here rounds the entry up to a whole one.
+    lowStockThresholdInUnits: 0.5,
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockThreshold: 15,
+    lowStockThresholdInUnits: 0.5,
+  });
+});
+
+// The tests below cover the threshold's own Unit. It is chosen per product and
+// is not the Default unit, so eggs quoted by the piece can be watched by the
+// tray. See "Low-stock threshold" in CONTEXT.md.
+
+test("a threshold naming a Unit is counted in that Unit, not in the Default unit", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    // The shop leads with the piece and still wants "warn me under 5 trays".
+    defaultUnitLabel: "piece",
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "tray", quantity: 4 },
+    ],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    quantityOnHand: 120,
+    // Five trays, not five pieces.
+    lowStockThreshold: 150,
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnit: { label: "tray" },
+    lowStockStatus: "low",
+  });
+});
+
+test("moving the Default unit afterwards leaves a threshold that names its own Unit alone", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "piece",
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+
+  await t.mutation(api.products.update, { id: eggs, defaultUnitLabel: "tray" });
+
+  // The threshold is seeded once and is then independent. It still reads 5
+  // trays.
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockThreshold: 150,
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnit: { label: "tray" },
+  });
+});
+
+// The number is the stock. The Unit is only how the number reads.
+test("rescaling the named Unit moves the reading and never the stored number", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    lowStockThresholdInUnits: 10,
+    lowStockThresholdUnitLabel: "tray",
+  });
+
+  // A tray of 15 instead of 30. Nothing else in this save touches the
+  // threshold.
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [
+      { label: "piece", baseEquivalent: 1, price: 8 },
+      { label: "tray", baseEquivalent: 15, price: 120 },
+    ],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockThreshold: 300,
+    // 300 eggs, now read as 20 trays.
+    lowStockThresholdInUnits: 20,
+  });
+});
+
+// The same rule `defaultUnitLabel` already follows.
+test("removing the named Unit clears the label and keeps the number", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: [{ label: "piece", baseEquivalent: 1, price: 8 }],
+  });
+
+  const after = await t.query(api.products.get, { id: eggs });
+  // 150 eggs is still 150 eggs. It now reads in the Default unit, which has
+  // fallen back to the Base unit.
+  expect(after).toMatchObject({
+    lowStockThreshold: 150,
+    lowStockThresholdInUnits: 150,
+    lowStockThresholdUnit: { label: "piece" },
+  });
+  expect(after?.lowStockThresholdUnitLabel).toBe(undefined);
+});
+
+// The Unit is a property of a threshold and not of the product. It therefore
+// cannot outlive the number.
+test("clearing the number clears the named Unit with it", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    lowStockThresholdInUnits: null,
+  });
+
+  const cleared = await t.query(api.products.get, { id: eggs });
+  expect(cleared?.lowStockThreshold).toBe(undefined);
+  expect(cleared?.lowStockThresholdUnitLabel).toBe(undefined);
+});
+
+test("a threshold can be re-denominated and re-entered in one save", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    lowStockThresholdInUnits: 150,
+  });
+
+  // "Warn me under 5 trays", typed over "warn me under 150 pieces".
+  await t.mutation(api.products.update, {
+    id: eggs,
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockThreshold: 150,
+    lowStockThresholdInUnits: 5,
+  });
+});
+
+// A Unit added in the same save that picks it. The create form and the detail
+// form both let her do this, so the conversion resolves against the Units the
+// call leaves behind and not against the ones it found.
+test("a threshold can name a Unit the same save adds", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: [{ label: "piece", baseEquivalent: 1, price: 8 }],
+    baseUnitLabel: "piece",
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    units: EGGS_UNITS,
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockThreshold: 150,
+  });
+});
+
+test("a threshold cannot name a Unit the product does not have", async () => {
+  const t = setupTest();
+  await expect(
+    t.mutation(api.products.create, {
+      name: "Eggs",
+      units: EGGS_UNITS,
+      baseUnitLabel: "piece",
+      lowStockThresholdInUnits: 5,
+      lowStockThresholdUnitLabel: "case",
+    }),
+  ).rejects.toThrow('"case" is not one of the Units');
+});
+
+// The pair travels together, so neither surface can write a Unit that counts
+// nothing. See "Low-stock threshold" in CONTEXT.md.
+test("a threshold Unit without a threshold is refused", async () => {
+  const t = setupTest();
+  await expect(
+    t.mutation(api.products.create, {
+      name: "Eggs",
+      units: EGGS_UNITS,
+      baseUnitLabel: "piece",
+      lowStockThresholdUnitLabel: "tray",
+    }),
+  ).rejects.toThrow("counts nothing");
+});
+
+test("the status check compares Base units and never converts at status time", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    defaultUnitLabel: "piece",
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+  // 151 eggs is one over 150. A status check that read "5" against the count,
+  // in any denomination, would get this wrong.
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      { kind: "existing", productId: eggs, unitLabel: "piece", quantity: 151 },
+    ],
+  });
+
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockStatus: "ok",
+  });
+});
+
+// The number and the Unit are one field on both forms, so both always travel.
+// A caller that moves only the number must still get the denomination its form
+// was showing, on the way in and on the way back out.
+test("moving only the number keeps the Unit the threshold already names", async () => {
+  const t = setupTest();
+  const eggs = await t.mutation(api.products.create, {
+    name: "Eggs",
+    units: EGGS_UNITS,
+    baseUnitLabel: "piece",
+    lowStockThresholdInUnits: 5,
+    lowStockThresholdUnitLabel: "tray",
+  });
+
+  await t.mutation(api.products.update, {
+    id: eggs,
+    lowStockThresholdInUnits: 6,
+  });
+
+  // Six trays is 180 eggs, and it still reads as six trays. A cleared label
+  // would convert in against the tray and read back in the piece.
+  expect(await t.query(api.products.get, { id: eggs })).toMatchObject({
+    lowStockThreshold: 180,
+    lowStockThresholdInUnits: 6,
+    lowStockThresholdUnit: { label: "tray" },
+  });
+});
