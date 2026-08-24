@@ -10,8 +10,12 @@ import {
 } from "../../../convex/remainderReading";
 import { ArchivedSection } from "../ArchivedSection";
 import { StockStatusPill } from "../StockStatusPill";
-import { thresholdFieldWording } from "./lowStockThresholdField";
+import {
+  resolveDraftThresholdUnit,
+  thresholdFieldWording,
+} from "./lowStockThresholdField";
 import { ReadingLadderField } from "./ReadingLadderField";
+import { ThresholdField } from "./ThresholdField";
 
 export default function ProductsPage() {
   const [search, setSearch] = useState("");
@@ -52,6 +56,13 @@ export default function ProductsPage() {
   // only hides the box until the value is back.
   const [ladderKeys, setLadderKeys] = useState<string[]>([]);
   const [lowStockThreshold, setLowStockThreshold] = useState("");
+  // Which Unit the threshold counts. null means she has picked none yet, which
+  // reads as the Default unit. The pick is held by label, and `updateExtraUnit`
+  // below drags it through a rename, the same way the Reading ladder's ticks
+  // follow their rows on the detail page.
+  const [thresholdUnitLabel, setThresholdUnitLabel] = useState<string | null>(
+    null,
+  );
   const [adding, setAdding] = useState(false);
 
   const unitLabels = [
@@ -59,14 +70,35 @@ export default function ProductsPage() {
     ...extraUnits.map((u) => u.label.trim()),
   ].filter(Boolean);
 
-  // The threshold box counts the Default unit this form is about to send. That
-  // is the Base unit while nothing else is nominated.
-  // A blank Base unit leaves the wording generic. The form is unsubmittable
-  // until it is typed, so nothing saves against the placeholder wording.
+  // The Default unit this form is about to send. That is the Base unit while
+  // nothing else is nominated. The threshold seeds from it until she picks
+  // another Unit.
+  const effectiveDefaultUnitLabel = unitLabels.includes(defaultUnitLabel)
+    ? defaultUnitLabel
+    : baseUnitLabel.trim();
+
+  // The Unit rows exactly as they stand this keystroke, blank names and
+  // unparsed sizes included. The threshold's chips read this list, and say so
+  // for the rows that cannot count anything yet. See ThresholdField.tsx.
+  const thresholdUnitOptions = [
+    { key: "base", label: baseUnitLabel.trim(), baseEquivalent: 1 },
+    ...extraUnits.map((u) => ({
+      key: u.key,
+      label: u.label.trim(),
+      baseEquivalent: Number(u.baseEquivalent),
+    })),
+  ];
+
+  // Which Unit the threshold counts right now. The field resolves this for
+  // itself; the form needs it too, to label the field and to name the Unit the
+  // save records. One resolution, so the two cannot disagree.
+  const thresholdUnit = resolveDraftThresholdUnit(
+    thresholdUnitOptions,
+    effectiveDefaultUnitLabel,
+    thresholdUnitLabel,
+  );
   const thresholdWording = thresholdFieldWording(
-    (unitLabels.includes(defaultUnitLabel)
-      ? defaultUnitLabel
-      : baseUnitLabel.trim()) || "unit",
+    thresholdUnit?.label ?? "unit",
   );
 
   const canAdd =
@@ -123,6 +155,17 @@ export default function ProductsPage() {
     );
   }
 
+  // The Base unit is a row like any other here, so a rename of it drags the
+  // threshold's pick the same way `updateExtraUnit` does. The Default unit
+  // marker needs no such care: it holds "" for the Base unit rather than its
+  // label.
+  function changeBaseUnitLabel(value: string) {
+    if (baseUnitLabel.trim() === thresholdUnitLabel) {
+      setThresholdUnitLabel(value.trim());
+    }
+    setBaseUnitLabel(value);
+  }
+
   function addExtraUnit() {
     setExtraUnits((prev) => [
       ...prev,
@@ -134,15 +177,36 @@ export default function ProductsPage() {
     key: string,
     patch: Partial<{ label: string; baseEquivalent: string; price: string }>,
   ) {
+    const old = extraUnits.find((u) => u.key === key);
     setExtraUnits((prev) =>
       prev.map((u) => (u.key === key ? { ...u, ...patch } : u)),
     );
+    // The threshold's Unit is held by label, and a rename moves the label. The
+    // pick follows the row it was made on.
+    // Without this, renaming a picked row re-denominates the threshold between
+    // two keystrokes: "5 trays" becomes 5 pieces, and 150 eggs become 5, with
+    // nothing on screen to say so. The detail page drags its Base unit and
+    // Default unit markers through a rename for the same reason.
+    if (
+      patch.label !== undefined &&
+      old !== undefined &&
+      old.label.trim() === thresholdUnitLabel
+    ) {
+      setThresholdUnitLabel(patch.label.trim());
+    }
   }
 
   function removeExtraUnit(key: string) {
+    const removed = extraUnits.find((u) => u.key === key);
     setExtraUnits((prev) => prev.filter((u) => u.key !== key));
     // The row is gone for good, unlike a half-typed one, so its tick goes too.
     setLadderKeys((keys) => keys.filter((k) => k !== key));
+    // So does the threshold's pick. The threshold then counts the Default
+    // unit, which is the same rule the mutation applies to a Unit that leaves
+    // a saved product.
+    if (removed !== undefined && removed.label.trim() === thresholdUnitLabel) {
+      setThresholdUnitLabel(null);
+    }
   }
 
   async function handleAdd(e: React.FormEvent) {
@@ -170,9 +234,14 @@ export default function ProductsPage() {
       defaultUnitLabel: unitLabels.includes(defaultUnitLabel)
         ? defaultUnitLabel
         : undefined,
-      lowStockThresholdInDefaultUnits: lowStockThreshold
+      lowStockThresholdInUnits: lowStockThreshold
         ? Number(lowStockThreshold)
         : undefined,
+      // The Unit travels with the number, and only with it. An empty box
+      // leaves both out, which is what the shop-wide threshold standing in
+      // means. See `validateThresholdUnit` in products.ts.
+      lowStockThresholdUnitLabel:
+        lowStockThreshold && thresholdUnit ? thresholdUnit.label : undefined,
       // Keys become labels here, and only here. Nothing ticked sends nothing at
       // all, because an absent ladder already means the plain Base-unit
       // reading.
@@ -185,6 +254,7 @@ export default function ProductsPage() {
     setDefaultUnitLabel("");
     setLadderKeys([]);
     setLowStockThreshold("");
+    setThresholdUnitLabel(null);
     setAdding(false);
     setFormOpen(false);
   }
@@ -235,7 +305,7 @@ export default function ProductsPage() {
               <input
                 id="product-base-unit-label"
                 value={baseUnitLabel}
-                onChange={(e) => setBaseUnitLabel(e.target.value)}
+                onChange={(e) => changeBaseUnitLabel(e.target.value)}
                 placeholder="e.g. piece, gram"
                 className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
               />
@@ -399,20 +469,21 @@ export default function ProductsPage() {
             </div>
           )}
 
-          <div>
+          <div className="rounded-xl border border-line p-2.5">
             <label
               htmlFor="product-low-stock-threshold"
-              className="text-sub block text-[13px] mb-1"
+              className="mb-1.5 block text-[13px] font-semibold"
             >
               {thresholdWording.label}
             </label>
-            <input
+            <ThresholdField
               id="product-low-stock-threshold"
-              type="number"
-              value={lowStockThreshold}
-              onChange={(e) => setLowStockThreshold(e.target.value)}
-              placeholder={thresholdWording.placeholder}
-              className="w-full rounded-[10px] border border-line bg-card px-2.5 py-2.5 text-[15px]"
+              units={thresholdUnitOptions}
+              defaultUnitLabel={effectiveDefaultUnitLabel}
+              threshold={lowStockThreshold}
+              onThresholdChange={setLowStockThreshold}
+              pickedLabel={thresholdUnitLabel}
+              onPickLabel={setThresholdUnitLabel}
             />
           </div>
           <div className="flex gap-2">

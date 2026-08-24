@@ -7,7 +7,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { thresholdToBaseUnits } from "../../../../convex/lowStockThreshold";
+import {
+  resolveThresholdUnit,
+  thresholdToBaseUnits,
+} from "../../../../convex/lowStockThreshold";
 import {
   buildReadingLadder,
   formatReading,
@@ -25,9 +28,11 @@ import { StockStatusPill } from "../../StockStatusPill";
 import { WindowedDayList } from "../../WindowedDayList";
 import {
   draftAfterSave,
+  resolveDraftThresholdUnit,
   thresholdFieldWording,
 } from "../lowStockThresholdField";
 import { ReadingLadderField } from "../ReadingLadderField";
+import { ThresholdField } from "../ThresholdField";
 
 // This type derives from the query and does not restate it. A new field, or a
 // new stock status, therefore reaches this form. Nobody has to widen a type
@@ -92,14 +97,17 @@ function ProductForm({ product }: { product: Product }) {
   // The picker below never appears, and this value stays null.
   const savedDefault =
     product.units.length > 1 ? product.defaultUnit.label : null;
-  // The threshold in the Default unit, which is the unit the field is labelled
-  // with. The row stores Base units, and `withStatus` divides. See
+  // The threshold in the Unit it names, which is the Unit the field's chips
+  // show as chosen. The row stores Base units, and `withStatus` divides. See
   // `thresholdToBaseUnits` in products.ts.
   const savedThreshold =
-    product.lowStockThresholdInDefaultUnits != null
-      ? String(product.lowStockThresholdInDefaultUnits)
+    product.lowStockThresholdInUnits != null
+      ? String(product.lowStockThresholdInUnits)
       : "";
-  const thresholdWording = thresholdFieldWording(product.defaultUnit.label);
+  // Which Unit that number counts. An unset threshold has no Unit of its own
+  // yet. The field therefore seeds from the Default unit, and the pick starts
+  // null. A threshold seeds once and is independent afterwards.
+  const savedThresholdUnitLabel = product.lowStockThresholdUnitLabel ?? null;
   const savedDenominationLabels = product.denominationLabels ?? [];
 
   const [name, setName] = useState(savedName);
@@ -109,6 +117,9 @@ function ProductForm({ product }: { product: Product }) {
     savedDefault,
   );
   const [lowStockThreshold, setLowStockThreshold] = useState(savedThreshold);
+  const [thresholdUnitLabel, setThresholdUnitLabel] = useState<string | null>(
+    savedThresholdUnitLabel,
+  );
   // The Reading ladder, held as the set of ticked labels. The draft keeps no
   // order, because nothing reads one. `buildReadingLadder` sorts by descending
   // Base equivalent, whatever the order of the ticks.
@@ -163,7 +174,12 @@ function ProductForm({ product }: { product: Product }) {
     JSON.stringify(units) !== JSON.stringify(savedUnits) ||
     baseUnitLabel !== savedBaseUnitLabel;
   const defaultDirty = defaultUnitLabel !== savedDefault;
-  const thresholdDirty = lowStockThreshold !== savedThreshold;
+  // The Unit is half of what the threshold says, so moving it alone is an
+  // edit. "Warn me under 5" reads as 5 trays or 5 pieces, and those are not
+  // the same warning.
+  const thresholdDirty =
+    lowStockThreshold !== savedThreshold ||
+    thresholdUnitLabel !== savedThresholdUnitLabel;
   // This compares the two ladders as sets. Which Units sit on the ladder is the
   // whole of the choice. Two boxes ticked in the other order are not an edit.
   const readingDirty = !sameLabels(denominationLabels, savedDenominationLabels);
@@ -205,6 +221,27 @@ function ProductForm({ product }: { product: Product }) {
     parsedUnits.find((u) => u.label === baseUnitTrimmed)?.baseEquivalent === 1;
 
   const canSave = name.trim().length > 0 && unitsValid;
+
+  // The Unit rows the threshold's chips offer, and the Unit its number counts
+  // right now. The list is the draft and not the saved product, so a Unit this
+  // same unsaved edit added can denominate the threshold. `products.update`
+  // resolves the label against the same resulting list.
+  // The rows key by index. A draft label can be blank or briefly duplicated
+  // mid-edit, so it is not a handle. Nothing in a chip holds state that a
+  // reindexed key would lose.
+  const thresholdUnitOptions = parsedUnits.map((u, index) => ({
+    key: String(index),
+    label: u.label,
+    baseEquivalent: u.baseEquivalent,
+  }));
+  const thresholdUnit = resolveDraftThresholdUnit(
+    thresholdUnitOptions,
+    product.defaultUnit.label,
+    thresholdUnitLabel,
+  );
+  const thresholdWording = thresholdFieldWording(
+    thresholdUnit?.label ?? "unit",
+  );
 
   // The boxes to offer. The reading itself answers this, and the form does not
   // re-derive it. The form must never offer a Denomination that
@@ -254,6 +291,10 @@ function ProductForm({ product }: { product: Product }) {
     if (field === "label") {
       if (old.label === baseUnitLabel) setBaseUnitLabel(value);
       if (old.label === defaultUnitLabel) setDefaultUnitLabel(value);
+      // The threshold names its Unit by label too. A rename otherwise
+      // re-denominates the threshold in silence: "5 trays" becomes 5 of
+      // whatever the Default unit is.
+      if (old.label === thresholdUnitLabel) setThresholdUnitLabel(value);
       // The ladder names its Denominations by label too, so a rename drags them
       // with it. The Denomination otherwise drops off the reading in silence.
       setDenominationLabels((labels) =>
@@ -275,6 +316,9 @@ function ProductForm({ product }: { product: Product }) {
     setUnits(units.filter((_, i) => i !== index));
     // A removed Default unit falls back to the Base unit. The server agrees.
     if (removed.label === defaultUnitLabel) setDefaultUnitLabel(null);
+    // So does a removed threshold Unit. The number stays: 150 eggs are still
+    // 150 eggs, and only stop reading as 5 trays. See `products.update`.
+    if (removed.label === thresholdUnitLabel) setThresholdUnitLabel(null);
     setDenominationLabels((labels) =>
       labels.filter((l) => l !== removed.label),
     );
@@ -309,9 +353,14 @@ function ProductForm({ product }: { product: Product }) {
         // unit. That would silently change how much stock it stands for.
         ...(thresholdDirty
           ? {
-              lowStockThresholdInDefaultUnits: lowStockThreshold
+              lowStockThresholdInUnits: lowStockThreshold
                 ? Number(lowStockThreshold)
                 : null,
+              // The Unit travels with the number, and only with it. A cleared
+              // box clears both. See `validateThresholdUnit` in products.ts.
+              ...(lowStockThreshold && thresholdUnit
+                ? { lowStockThresholdUnitLabel: thresholdUnit.label }
+                : {}),
             }
           : {}),
         ...(readingDirty ? { denominationLabels } : {}),
@@ -357,19 +406,39 @@ function ProductForm({ product }: { product: Product }) {
       setDefaultUnitLabel(
         parsedUnits.length <= 1 ? null : nextDefaultUnit.label,
       );
-      // The threshold's resulting stored value, in Base units. A dirty box
-      // went to the server and converted against the Default unit the product
-      // led with. An untouched box left the row where it was.
+      // The threshold's resulting stored value, in Base units. A dirty field
+      // went to the server and converted against the Unit its chips showed as
+      // chosen. An untouched field left the row where it was.
       const nextStoredThreshold = thresholdDirty
-        ? lowStockThreshold
-          ? thresholdToBaseUnits(Number(lowStockThreshold), product.defaultUnit)
+        ? lowStockThreshold && thresholdUnit
+          ? thresholdToBaseUnits(Number(lowStockThreshold), thresholdUnit)
           : undefined
         : product.lowStockThreshold;
-      // The box re-denominates with the Default unit. A save that moved the
-      // Default unit therefore leaves the box standing for the same stock. See
-      // `draftAfterSave`.
+      // The Unit that number now names. A cleared threshold names none. An
+      // untouched one keeps the product's, unless this edit removed that Unit,
+      // which the mutation clears. See `products.update`.
+      const nextStoredThresholdUnitLabel = thresholdDirty
+        ? lowStockThreshold
+          ? (thresholdUnit?.label ?? null)
+          : null
+        : product.lowStockThresholdUnitLabel != null &&
+            parsedUnits.some(
+              (u) => u.label === product.lowStockThresholdUnitLabel,
+            )
+          ? product.lowStockThresholdUnitLabel
+          : null;
+      setThresholdUnitLabel(nextStoredThresholdUnitLabel);
+      // The box re-denominates with the Unit the threshold now reads in. A
+      // save that dropped that Unit therefore leaves the box standing for the
+      // same stock, in whatever reads it instead. See `draftAfterSave` and
+      // `resolveThresholdUnit`.
+      const nextThresholdUnit = resolveThresholdUnit(
+        parsedUnits,
+        nextStoredThresholdUnitLabel ?? undefined,
+        nextDefaultUnit,
+      );
       setLowStockThreshold(
-        draftAfterSave(nextStoredThreshold, nextDefaultUnit),
+        draftAfterSave(nextStoredThreshold, nextThresholdUnit),
       );
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -463,23 +532,34 @@ function ProductForm({ product }: { product: Product }) {
           label={thresholdWording.label}
           htmlFor="edit-low-stock-threshold"
           dirty={thresholdDirty}
+          // The Unit is half of what the threshold said, so the was-line
+          // carries it. "was 5" over a field now reading 5 trays would look
+          // like no change at all.
           was={
-            product.lowStockThresholdInDefaultUnits != null
+            product.lowStockThresholdInUnits != null
               ? formatCount(
-                  product.lowStockThresholdInDefaultUnits,
-                  product.defaultUnit.label,
+                  product.lowStockThresholdInUnits,
+                  product.lowStockThresholdUnit.label,
                 )
               : "shop default"
           }
-          onReset={() => setLowStockThreshold(savedThreshold)}
+          onReset={() => {
+            setLowStockThreshold(savedThreshold);
+            setThresholdUnitLabel(savedThresholdUnitLabel);
+          }}
         >
-          <input
+          {/* No bounded block here, unlike the add form. `DiffField` brings
+              its own chrome, and a border inside it would nest a box in a
+              box. */}
+          <ThresholdField
             id="edit-low-stock-threshold"
-            type="number"
-            value={lowStockThreshold}
-            onChange={(e) => setLowStockThreshold(e.target.value)}
-            placeholder={thresholdWording.placeholder}
-            className={fieldInputClass(thresholdDirty)}
+            units={thresholdUnitOptions}
+            defaultUnitLabel={product.defaultUnit.label}
+            threshold={lowStockThreshold}
+            onThresholdChange={setLowStockThreshold}
+            pickedLabel={thresholdUnitLabel}
+            onPickLabel={setThresholdUnitLabel}
+            borderClassName={fieldBorderClass(thresholdDirty)}
           />
         </DiffField>
         {denominations.length > 0 && (
@@ -641,6 +721,15 @@ const FIELD_INPUT_BASE =
   "w-full rounded-[10px] border bg-card px-2.5 py-2.5 text-[15px]";
 
 /**
+ * The amber border a dirty field takes. `ThresholdField` lays its own box out
+ * and takes only this, because the box's width is part of the sentence it sits
+ * in. See `fieldInputClass` for the whole-input version.
+ */
+function fieldBorderClass(dirty: boolean): string {
+  return dirty ? "border-amber-400 ring-1 ring-amber-300" : "border-line";
+}
+
+/**
  * Whether two ladders name the same Units. Order is deliberately not part of
  * the comparison. The reading sorts its own Denominations. See
  * `buildReadingLadder`. The same two boxes ticked in the other order therefore
@@ -655,9 +744,7 @@ function sameLabels(a: string[], b: string[]): boolean {
 // An edited input takes an amber border and ring. The change stays visible
 // when the field scrolls past its label.
 function fieldInputClass(dirty: boolean): string {
-  return `${FIELD_INPUT_BASE} ${
-    dirty ? "border-amber-400 ring-1 ring-amber-300" : "border-line"
-  }`;
+  return `${FIELD_INPUT_BASE} ${fieldBorderClass(dirty)}`;
 }
 
 const UNIT_INPUT =
