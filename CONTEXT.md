@@ -53,7 +53,7 @@ One logged event — a Delivery, a Pull-out, or a Sale — together with the Mov
 _Avoid_: batch, group, document (Convex's word for any row), transaction; "line item" as a distinct concept from Movement
 
 **Delivery**:
-An Entry that brings stock in — every Movement under it adds to its product's count. Its supplier is optional, because stock bought retail or received as a gift is still worth recording with nobody named. A Line may also create the product it names, so a product first seen on an arriving shipment does not have to be added separately beforehand.
+An Entry that brings stock in — every Movement under it adds to its product's count. Its supplier is optional, because stock bought retail or received as a gift is still worth recording with nobody named. A Line may also create the product it names, so a product first seen on an arriving shipment does not have to be added separately beforehand. Such a Line declares that product's Units as well as its name, because a shipment arrives in bulk and the Unit it arrives in need not be the one the product is based in — eggs first seen on a delivery are received as 10 trays and still held as 300 pieces.
 _Avoid_: purchase (names money changing hands, which a delivery does not record), restock (a delivery of a product never carried before is not a re-stock), receiving, stock-in, goods receipt
 
 **Pull-out**:
