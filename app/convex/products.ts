@@ -53,8 +53,11 @@ export function resolveDefaultUnitLabel(product: {
  * equivalent is 1.
  * Nothing upstream seeds a `pc` Unit. A plausible default is how a product ends
  * up based in the wrong Unit. See docs/adr/0004-base-unit-locked.md.
+ * `products.create` and the `kind: "new"` Line of `deliveries.create` are the
+ * two ways a product is born. Both call this function, so a product created
+ * from a Delivery holds the same invariants as one created from the form.
  */
-function validateUnits(
+export function validateUnits(
   units: { label: string; baseEquivalent: number; price: number }[],
   baseUnitLabel: string,
 ) {

@@ -312,3 +312,154 @@ test("deliveries list newest first, each carrying its lines and net change", asy
     { productName: "Coke 1.5L", baseAmount: 12 },
   ]);
 });
+
+// A shipment arrives in bulk, so a product based in the piece is still
+// received as "10 trays". The Line that creates the product therefore declares
+// the tray beside the piece, and counts itself in it.
+test("a kind: new Line declares a second Unit and records its Unit quantity in it", async () => {
+  const t = setupTest();
+
+  const deliveryId = await t.mutation(api.deliveries.create, {
+    lines: [
+      {
+        kind: "new",
+        name: "Eggs Medium",
+        unitLabel: "piece",
+        price: 8,
+        extraUnits: [{ label: "tray", baseEquivalent: 30, price: 220 }],
+        quantityUnitLabel: "tray",
+        quantity: 10,
+      },
+    ],
+  });
+
+  const products = await t.query(api.products.list, {});
+  const created = products.find((p) => p.name === "Eggs Medium");
+  expect(created).toMatchObject({
+    baseUnitLabel: "piece",
+    units: [
+      { label: "piece", baseEquivalent: 1, price: 8 },
+      { label: "tray", baseEquivalent: 30, price: 220 },
+    ],
+    quantityOnHand: 300,
+  });
+
+  // The Movement reads back the way it was entered, and not as 300 pieces.
+  const entries = await t.query(api.deliveries.list, {});
+  expect(entries.find((e) => e._id === deliveryId)?.lines).toMatchObject([
+    { unitLabel: "tray", unitQuantity: 10, baseAmount: 300 },
+  ]);
+
+  if (!created) throw new Error("Product was not created");
+  await expectCacheMatchesLedger(t, created._id);
+});
+
+// The step that creates the product leaves the second Unit's price optional.
+// A product's Unit may not go without a price, so the Base unit's price
+// stands in at the second Unit's own Base equivalent.
+test("a second Unit with no price of its own prices from the Base unit", async () => {
+  const t = setupTest();
+
+  await t.mutation(api.deliveries.create, {
+    lines: [
+      {
+        kind: "new",
+        name: "Eggs Medium",
+        unitLabel: "piece",
+        price: 8,
+        extraUnits: [{ label: "tray", baseEquivalent: 30 }],
+        quantity: 2,
+      },
+    ],
+  });
+
+  const products = await t.query(api.products.list, {});
+  expect(products.find((p) => p.name === "Eggs Medium")).toMatchObject({
+    units: [
+      { label: "piece", baseEquivalent: 1, price: 8 },
+      { label: "tray", baseEquivalent: 30, price: 240 },
+    ],
+    // The Line named no Unit, so it counts the Base unit.
+    quantityOnHand: 2,
+  });
+});
+
+test("a second Unit repeating the Base unit's label is rejected", async () => {
+  const t = setupTest();
+
+  await expect(
+    t.mutation(api.deliveries.create, {
+      lines: [
+        {
+          kind: "new",
+          name: "Eggs Medium",
+          unitLabel: "tray",
+          price: 220,
+          extraUnits: [{ label: "Tray", baseEquivalent: 30 }],
+          quantity: 1,
+        },
+      ],
+    }),
+  ).rejects.toThrow();
+
+  const products = await t.query(api.products.list, {});
+  expect(products.find((p) => p.name === "Eggs Medium")).toBeUndefined();
+});
+
+test("a second Unit with a fractional Base equivalent is rejected", async () => {
+  const t = setupTest();
+
+  await expect(
+    t.mutation(api.deliveries.create, {
+      lines: [
+        {
+          kind: "new",
+          name: "Eggs Medium",
+          unitLabel: "piece",
+          price: 8,
+          extraUnits: [{ label: "half tray", baseEquivalent: 0.5 }],
+          quantity: 1,
+        },
+      ],
+    }),
+  ).rejects.toThrow();
+
+  const products = await t.query(api.products.list, {});
+  expect(products.find((p) => p.name === "Eggs Medium")).toBeUndefined();
+});
+
+test("a quantityUnitLabel naming no Unit of the new product is rejected", async () => {
+  const t = setupTest();
+
+  await expect(
+    t.mutation(api.deliveries.create, {
+      lines: [
+        {
+          kind: "new",
+          name: "Eggs Medium",
+          unitLabel: "piece",
+          price: 8,
+          quantityUnitLabel: "tray",
+          quantity: 10,
+        },
+      ],
+    }),
+  ).rejects.toThrow();
+
+  const products = await t.query(api.products.list, {});
+  expect(products.find((p) => p.name === "Eggs Medium")).toBeUndefined();
+});
+
+test("a kind: new line with no name is rejected", async () => {
+  const t = setupTest();
+
+  await expect(
+    t.mutation(api.deliveries.create, {
+      lines: [
+        { kind: "new", name: "   ", unitLabel: "pc", price: 25, quantity: 3 },
+      ],
+    }),
+  ).rejects.toThrow();
+
+  expect(await t.query(api.deliveries.list, {})).toHaveLength(0);
+});

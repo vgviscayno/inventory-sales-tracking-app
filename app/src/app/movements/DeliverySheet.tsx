@@ -5,26 +5,48 @@
 // Search a product by name. Tap a result to add a Line. Adjust with the
 // steppers or a typed quantity. Drop a mis-tapped Line, and save.
 //
+// A product the catalog does not hold yet gets a step of its own. The sheet
+// gives the whole surface to that step. The step then collapses the product
+// into a Line, and every Line has one shape.
+// Two things follow. A new product cannot crowd a row it does not fit. The
+// step also has the room for a second Unit. A shipment of eggs therefore
+// records as 10 trays.
+//
 // The same component reopens an existing Delivery for a correction. An
 // `entryId` prefills the Lines from `getEntry` instead of an empty sheet. The
 // save then routes through the diff in `editEntry`, and not `create`.
-// Inline "+ Add as new product" only makes sense while somebody logs a fresh
-// shipment. The sheet hides it during an edit, because a forgotten Line there
-// names a product the catalog already holds.
+// The new-product step only makes sense while somebody logs a fresh shipment.
+// The sheet hides its affordances during an edit, because a forgotten Line
+// there names a product the catalog already holds.
+//
+// PulloutSheet.tsx mirrors this sheet, and the Register's sale sheet mirrors
+// both. Neither takes the step. A Pull-out and a Sale move stock the shop
+// already holds, so neither can create a product. Their Line lists also carry
+// no `kind: "new"` row, so neither carries the layout defect this step fixes.
 
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { roundCentavos } from "../../../convex/money";
 import { findNegativeProjections } from "../../../convex/negativeProjections";
 import { formatStock } from "../../../convex/remainderReading";
-import { formatCount } from "../../../convex/unitLabels";
+import { formatCount, unitLabelFor } from "../../../convex/unitLabels";
 import { SupplierPicker } from "../SupplierPicker";
+import {
+  countedIn,
+  emptyDraft,
+  extraUnitComplete,
+  extraUnitPrice,
+  isComplete,
+  type NewProductDraft,
+  toCreateLine,
+} from "./newProductLine";
+import { unitSuggestions } from "./unitSuggestions";
 
-// A Line either names a product that already exists, or collects the name and
-// price to create one with. The second kind appears once somebody chooses
-// "+ Add as new product".
-// `key` gives both kinds a stable identity, for React and for the `bump`,
+// A Line either names a product that already exists, or carries what a new
+// product needs. The second kind arrives through the new-product step.
+// `key` gives every kind a stable identity, for React and for the `bump`,
 // `setQuantity`, and `removeLine` calls below. Those calls do not care which
 // kind they touch.
 // A Line prefilled from an Entry under edit carries `movementId` and the
@@ -64,14 +86,11 @@ type Line =
       quantity: number;
       originalBaseAmount: number;
     }
-  | {
-      kind: "new";
-      key: string;
-      name: string;
-      unitLabel: string;
-      price: string;
-      quantity: number;
-    };
+  | NewLine;
+
+// A Line that carries a product this Delivery creates. Everything the product
+// itself needs lives in the draft. See newProductLine.ts.
+type NewLine = { kind: "new"; key: string } & NewProductDraft;
 
 export function DeliverySheet({
   onClose,
@@ -108,6 +127,24 @@ export function DeliverySheet({
   // stands on the Ledger.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // The new-product step, and which Line it is open on. `mode` separates a
+  // product this step is putting into the delivery from one already in it, and
+  // `original` is the Line the step opened with. Backing out of an edit
+  // therefore reverts, and does not drop a Line that was fine before somebody
+  // touched it.
+  const [step, setStep] = useState<{
+    key: string;
+    mode: "create" | "edit";
+    original: NewLine | null;
+  } | null>(null);
+
+  // A source of Line keys that does not read the clock. Two Lines added inside
+  // one millisecond stay distinct.
+  const nextKey = useRef(0);
+  function takeKey(prefix: string) {
+    nextKey.current += 1;
+    return `${prefix}:${nextKey.current}`;
+  }
 
   // The prefill runs once, at the moment the Entry loads. It must not run on
   // every re-render of `existingEntry`. A refresh of the query would otherwise
@@ -155,6 +192,12 @@ export function DeliverySheet({
       )
     : [];
 
+  // The labels the new-product step offers. See unitSuggestions.ts.
+  const suggestions = useMemo(
+    () => unitSuggestions(allProducts),
+    [allProducts],
+  );
+
   function addExistingLine(productId: Id<"products">) {
     setWarned(false);
     const product = allProducts.find((p) => p._id === productId);
@@ -164,7 +207,7 @@ export function DeliverySheet({
       ...prev,
       {
         kind: "existing",
-        key: `${productId}:${Date.now()}`,
+        key: takeKey(productId),
         productId,
         unitLabel,
         quantity: 1,
@@ -193,19 +236,31 @@ export function DeliverySheet({
     );
   }
 
-  function addNewProductLine(name: string) {
-    setLines((prev) => [
-      ...prev,
-      {
-        kind: "new",
-        key: `new:${Date.now()}`,
-        name,
-        unitLabel: "",
-        price: "",
-        quantity: 1,
-      },
-    ]);
+  // Open the step on a product this delivery is about to create. The Line goes
+  // into the list first, so every later call reaches it by key alone.
+  function openNewProductStep(name: string) {
+    setWarned(false);
+    const key = takeKey("new");
+    setLines((prev) => [...prev, { kind: "new", key, ...emptyDraft(name) }]);
     setSearch("");
+    setStep({ key, mode: "create", original: null });
+  }
+
+  function openEditStep(line: NewLine) {
+    setStep({ key: line.key, mode: "edit", original: line });
+  }
+
+  // Back out of the step. A half-typed product was never in the delivery, so
+  // it goes with the step. A reopened one returns to what the step opened
+  // with.
+  function closeStep(stepLine: NewLine) {
+    if (!step) return;
+    if (step.mode === "create") {
+      if (!isComplete(stepLine)) removeLine(stepLine.key);
+    } else if (step.original) {
+      patchNewLine(stepLine.key, step.original);
+    }
+    setStep(null);
   }
 
   function bump(key: string, by: number) {
@@ -224,18 +279,11 @@ export function DeliverySheet({
     );
   }
 
-  function setNewProductUnitLabel(key: string, unitLabel: string) {
+  function patchNewLine(key: string, fields: Partial<NewLine>) {
+    setWarned(false);
     setLines((prev) =>
       prev.map((l) =>
-        l.key === key && l.kind === "new" ? { ...l, unitLabel } : l,
-      ),
-    );
-  }
-
-  function setNewProductPrice(key: string, price: string) {
-    setLines((prev) =>
-      prev.map((l) =>
-        l.key === key && l.kind === "new" ? { ...l, price } : l,
+        l.key === key && l.kind === "new" ? { ...l, ...fields } : l,
       ),
     );
   }
@@ -250,7 +298,7 @@ export function DeliverySheet({
         product: (typeof allProducts)[number];
       })
     | Extract<Line, { kind: "deleted" }>
-    | Extract<Line, { kind: "new" }>;
+    | NewLine;
 
   const resolvedLines = lines.flatMap<ResolvedLine>((line) => {
     if (line.kind === "new" || line.kind === "deleted") return [line];
@@ -263,6 +311,9 @@ export function DeliverySheet({
   // whole Line.
   // An edit is what turns a lowered or dropped Line into a loss of stock. The
   // warning below judges these deltas, and not the raw typed Unit quantity.
+  // A `kind: "new"` Line names a product that does not exist yet. It starts at
+  // zero and this Delivery only adds to it, so it can carry no Negative
+  // projection.
   const deltaLines: { productId: Id<"products">; delta: number }[] = [];
   for (const line of resolvedLines) {
     if (line.kind !== "existing") continue;
@@ -326,20 +377,30 @@ export function DeliverySheet({
   const canSave =
     isDeleteViaEmptySave ||
     (resolvedLines.length > 0 &&
-      resolvedLines.every(
-        (l) =>
-          l.kind === "existing" ||
-          l.kind === "deleted" ||
-          (l.unitLabel.trim().length > 0 && Number(l.price) > 0),
-      ));
+      resolvedLines.every((l) => l.kind !== "new" || isComplete(l)));
+
+  const stepLine = step
+    ? lines.find((l): l is NewLine => l.key === step.key && l.kind === "new")
+    : undefined;
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Escape leaves one surface at a time. It backs out of the new-product
+      // step where the step is open, and closes the sheet otherwise. A single
+      // Escape must not take the whole delivery with it.
+      if (stepLine) {
+        closeStep(stepLine);
+        return;
+      }
+      onClose();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+    // No dependency list. The handler reads the step as it stands on this
+    // render, so it re-registers on every render. A list here would hold an
+    // Escape against a step that is already closed.
+  });
 
   async function handleSave() {
     if (!canSave) return;
@@ -405,18 +466,12 @@ export function DeliverySheet({
             .map((l) =>
               l.kind === "existing"
                 ? {
-                    kind: "existing",
+                    kind: "existing" as const,
                     productId: l.productId,
                     unitLabel: l.unitLabel,
                     quantity: l.quantity,
                   }
-                : {
-                    kind: "new",
-                    name: l.name,
-                    unitLabel: l.unitLabel.trim(),
-                    price: Number(l.price),
-                    quantity: l.quantity,
-                  },
+                : toCreateLine(l),
             ),
           supplierId: supplierId ?? undefined,
         });
@@ -460,314 +515,697 @@ export function DeliverySheet({
       {/* biome-ignore lint/a11y/noStaticElementInteractions: only stops click propagation, not a user affordance */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: only stops click propagation, not a user affordance */}
       <div
-        className="card fixed inset-x-0 bottom-0 z-21 mx-auto max-h-[80vh] max-w-120 overflow-y-auto rounded-t-2xl rounded-b-none px-3.5 pt-4 pb-19"
+        className="card fixed inset-x-0 bottom-0 z-21 mx-auto max-h-[85vh] max-w-120 overflow-y-auto rounded-t-2xl rounded-b-none px-3.5 pt-4 pb-19"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-line" />
-        <h3 className="mb-2.5 font-semibold">
-          {isEditing ? "Edit delivery" : "Log a delivery"}
-        </h3>
 
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search products to add…"
-          className="w-full rounded-[10px] border border-line bg-card px-3 py-2.5 text-[15px]"
-        />
-
-        {trimmedSearch && (
-          <div className="card mt-1.5 max-h-40 divide-y divide-line overflow-y-auto">
-            {matches.map((p) => (
-              <button
-                key={p._id}
-                type="button"
-                onClick={() => addExistingLine(p._id)}
-                className="flex w-full items-center justify-between px-3 py-2 text-left"
-              >
-                <span>{p.name}</span>
-                <span className="text-sub text-[13px]">
-                  {formatStock(p)} on hand
-                </span>
-              </button>
-            ))}
-            {matches.length === 0 && !isEditing && (
-              <button
-                type="button"
-                onClick={() => addNewProductLine(trimmedSearch)}
-                className="text-accent flex w-full items-center px-3 py-2 text-left font-semibold"
-              >
-                + Add "{trimmedSearch}" as new product
-              </button>
-            )}
-            {matches.length === 0 && isEditing && (
-              <p className="text-sub px-3 py-2 text-[13px]">
-                No products match
-              </p>
-            )}
-          </div>
-        )}
-
-        <div className="mt-3 space-y-2">
-          {resolvedLines.map((l) => {
-            const isFocused =
-              focusProductId !== undefined &&
-              l.kind === "existing" &&
-              l.productId === focusProductId;
-            const isOther =
-              focusProductId !== undefined &&
-              l.kind === "existing" &&
-              !isFocused;
-
-            if (l.kind === "deleted") {
-              return (
-                <div
-                  key={l.key}
-                  className="flex items-center justify-between gap-2 rounded-lg p-1.5 opacity-60"
-                >
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <span className="pill shrink-0 bg-neutral-200 text-neutral-500 dark:bg-neutral-700 dark:text-neutral-400">
-                      Deleted
-                    </span>
-                    <div className="min-w-0 truncate">{l.productName}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
-                      ×{formatCount(l.quantity, l.unitLabel)}
-                    </span>
-                  </div>
-                </div>
-              );
-            }
-
-            return (
-              <div
-                key={l.key}
-                className={`flex items-center justify-between gap-2 rounded-lg p-1.5 ${
-                  isFocused ? "bg-accent/10" : ""
-                }`}
-              >
-                <div className="flex min-w-0 items-center gap-1.5">
-                  {l.kind === "new" && (
-                    <span className="pill new shrink-0">New</span>
-                  )}
-                  <div className="min-w-0 truncate">
-                    {l.kind === "existing" ? l.product.name : l.name}
-                  </div>
-                  {isOther && (
-                    <span className="text-sub shrink-0 text-[11px]">
-                      also in this entry
-                    </span>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {l.kind === "new" && (
-                    <>
-                      <input
-                        type="text"
-                        value={l.unitLabel}
-                        onChange={(e) =>
-                          setNewProductUnitLabel(l.key, e.target.value)
-                        }
-                        placeholder="Base unit"
-                        aria-label={`Base unit for ${l.name}`}
-                        className="w-20 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
-                      />
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        value={l.price}
-                        onChange={(e) =>
-                          setNewProductPrice(l.key, e.target.value)
-                        }
-                        placeholder="Price"
-                        aria-label={`Price for ${l.name}`}
-                        className="w-16 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
-                      />
-                    </>
-                  )}
-                  {l.kind === "existing" && l.product.units.length > 1 && (
-                    <select
-                      value={l.unitLabel}
-                      onChange={(e) => setLineUnit(l.key, e.target.value)}
-                      aria-label={`Unit for ${l.product.name}`}
-                      className="rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
-                    >
-                      {l.product.units.map((u) => (
-                        <option key={u.label} value={u.label}>
-                          {u.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => bump(l.key, -1)}
-                    className="h-7.5 w-7.5 rounded-lg border border-line bg-card"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    value={l.quantity}
-                    onChange={(e) =>
-                      setQuantity(l.key, Math.max(1, Number(e.target.value)))
-                    }
-                    className="w-14 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => bump(l.key, 1)}
-                    className="h-7.5 w-7.5 rounded-lg border border-line bg-card"
-                  >
-                    +
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeLine(l.key)}
-                    className="text-danger px-1 text-lg leading-none"
-                    aria-label={`Remove ${l.kind === "existing" ? l.product.name : l.name}`}
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          {resolvedLines.length === 0 && (
-            <p className="text-sub py-4 text-center text-[13px]">
-              Search above and tap a product to add it to this delivery
-            </p>
-          )}
-        </div>
-
-        <div className="mt-3">
-          <SupplierPicker value={supplierId} onChange={setSupplierId} />
-        </div>
-
-        {error && <p className="text-danger mt-2 text-sm">{error}</p>}
-
-        {/* Removing the last line and saving deletes the entry — this is
-            that confirm, folding in how many products would go negative
-            rather than stacking a second dialog on top of it. */}
-        {warned && isDeleteViaEmptySave && (
-          <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
-            <p className="font-semibold text-danger">
-              Removing the last line deletes this entry
-            </p>
-            {negativeProjections.length > 0 && (
-              <ul className="mt-1 space-y-0.5 text-[13px]">
-                {negativeProjections.map(
-                  ({ productId, product, projected }) => (
-                    <li key={productId}>
-                      <span className="font-semibold">{product.name}</span> —
-                      currently {formatStock(product)}, deleting leaves{" "}
-                      {formatStock({ ...product, quantityOnHand: projected })}
-                    </li>
-                  ),
-                )}
-              </ul>
-            )}
-            <p className="mt-1.5 text-sub text-[13px]">
-              Save again to confirm the delete.
-            </p>
-          </div>
-        )}
-
-        {/* Only when the client's own counts show the overdraw — on the
-            server-refusal path `negativeProjections` is empty and the error above is
-            the warning. */}
-        {warned && negativeProjections.length > 0 && !isDeleteViaEmptySave && (
-          <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
-            <p className="font-semibold text-danger">
-              This will take stock below zero
-            </p>
-            <ul className="mt-1 space-y-0.5 text-[13px]">
-              {negativeProjections.map(({ productId, product, projected }) => (
-                <li key={productId}>
-                  <span className="font-semibold">{product.name}</span> —
-                  currently {formatStock(product)}, this edit leaves{" "}
-                  {formatStock({ ...product, quantityOnHand: projected })}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-1.5 text-sub text-[13px]">
-              Record the edit anyway — the count is what needs fixing, not the
-              edit. Recount these after.
-            </p>
-          </div>
-        )}
-
-        <button
-          type="button"
-          disabled={!canSave || saving}
-          onClick={handleSave}
-          className={`mt-3.5 w-full rounded-xl py-3.5 font-bold text-accent-ink disabled:bg-[#d6d3d1] ${
-            warned ? "bg-danger" : "bg-accent"
-          }`}
-        >
-          {saving
-            ? "Saving..."
-            : warned
-              ? isDeleteViaEmptySave
-                ? "Delete entry"
-                : "Record edit anyway"
-              : isEditing
-                ? "Save Changes"
-                : "Save Delivery"}
-        </button>
-
-        {isEditing && (
+        {stepLine ? (
+          <NewProductStep
+            line={stepLine}
+            mode={step?.mode ?? "create"}
+            suggestions={suggestions}
+            onPatch={(fields) => patchNewLine(stepLine.key, fields)}
+            onBump={(by) => bump(stepLine.key, by)}
+            onBack={() => closeStep(stepLine)}
+            onConfirm={() => setStep(null)}
+          />
+        ) : (
           <>
-            <div className="mt-2 flex gap-2">
-              {confirmingDelete && (
+            <h3 className="mb-2.5 font-semibold">
+              {isEditing ? "Edit delivery" : "Log a delivery"}
+            </h3>
+
+            <div className="flex gap-2">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search products to add…"
+                className="min-w-0 flex-1 rounded-[10px] border border-line bg-card px-3 py-2.5 text-[15px]"
+              />
+              {/* The way to a new product that does not go through a search
+                  finding nothing. A near-miss on a name the catalog already
+                  holds used to hide the affordance completely. */}
+              {!isEditing && (
                 <button
                   type="button"
-                  onClick={() => setConfirmingDelete(false)}
-                  disabled={deleting}
-                  className="card flex-1 py-2.5 font-semibold"
+                  onClick={() => openNewProductStep(trimmedSearch)}
+                  className="text-accent shrink-0 rounded-[10px] border border-accent px-3 text-[14px] font-semibold"
                 >
-                  Cancel
+                  + New
                 </button>
               )}
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleting}
-                className={`flex-1 rounded-xl border py-2.5 font-semibold ${
-                  confirmingDelete
-                    ? "bg-danger border-danger text-white"
-                    : "text-danger border-line"
-                }`}
-              >
-                {deleting
-                  ? "Deleting..."
-                  : confirmingDelete
-                    ? "Confirm Delete"
-                    : "Delete Entry"}
-              </button>
             </div>
-            {confirmingDelete && deleteNegativeProjections.length > 0 && (
-              <div className="mt-2 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
-                <p className="font-semibold text-danger">
-                  This will take stock below zero
-                </p>
-                <ul className="mt-1 space-y-0.5 text-[13px]">
-                  {deleteNegativeProjections.map(
-                    ({ productId, product, projected }) => (
-                      <li key={productId}>
-                        <span className="font-semibold">{product.name}</span> —
-                        currently {formatStock(product)}, deleting this entry
-                        leaves{" "}
-                        {formatStock({ ...product, quantityOnHand: projected })}
-                      </li>
-                    ),
-                  )}
-                </ul>
+
+            {trimmedSearch && (
+              <div className="card mt-1.5 max-h-52 divide-y divide-line overflow-y-auto">
+                {matches.map((p) => (
+                  <button
+                    key={p._id}
+                    type="button"
+                    onClick={() => addExistingLine(p._id)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                  >
+                    <span className="min-w-0 truncate">{p.name}</span>
+                    <span className="text-sub shrink-0 text-[13px]">
+                      {formatStock(p)} on hand
+                    </span>
+                  </button>
+                ))}
+                {!isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => openNewProductStep(trimmedSearch)}
+                    className="text-accent flex w-full items-center gap-1.5 px-3 py-2.5 text-left font-semibold"
+                  >
+                    <span>+</span>
+                    <span className="min-w-0 truncate">
+                      Add “{trimmedSearch}” as a new product
+                    </span>
+                  </button>
+                )}
+                {matches.length === 0 && isEditing && (
+                  <p className="text-sub px-3 py-2 text-[13px]">
+                    No products match
+                  </p>
+                )}
               </div>
+            )}
+
+            <div className="mt-3 space-y-2">
+              {resolvedLines.map((l) => {
+                const isFocused =
+                  focusProductId !== undefined &&
+                  l.kind === "existing" &&
+                  l.productId === focusProductId;
+                const isOther =
+                  focusProductId !== undefined &&
+                  l.kind === "existing" &&
+                  !isFocused;
+
+                if (l.kind === "deleted") {
+                  return (
+                    <div
+                      key={l.key}
+                      className="flex items-center justify-between gap-2 rounded-lg p-1.5 opacity-60"
+                    >
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="pill shrink-0 bg-neutral-200 text-neutral-500 dark:bg-neutral-700 dark:text-neutral-400">
+                          Deleted
+                        </span>
+                        <div className="min-w-0 truncate">{l.productName}</div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="w-14 px-1.5 py-1 text-center font-semibold text-sub">
+                          ×{formatCount(l.quantity, l.unitLabel)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // A new product's Line carries the New pill, its name, and the
+                // Unit its count is read in. Everything else the step settled
+                // stays on the step. A price and a Base equivalence here
+                // truncate, and read as a row nobody can take in at a glance.
+                if (l.kind === "new") {
+                  return (
+                    <div
+                      key={l.key}
+                      className="flex items-center justify-between gap-2 rounded-lg p-1.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openEditStep(l)}
+                        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                      >
+                        <span className="pill new shrink-0">New</span>
+                        <span className="min-w-0">
+                          <span className="block truncate">{l.name}</span>
+                          <span className="text-sub block text-[12px]">
+                            tap to edit
+                          </span>
+                        </span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <span className="text-sub text-[13px]">
+                          {unitLabelFor(l.quantity, countedIn(l) || "unit")}
+                        </span>
+                        <Stepper
+                          quantity={l.quantity}
+                          onBump={(by) => bump(l.key, by)}
+                          onSet={(n) => setQuantity(l.key, n)}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeLine(l.key)}
+                        className="text-danger shrink-0 px-1 text-lg leading-none"
+                        aria-label={`Remove ${l.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={l.key}
+                    className={`flex items-center justify-between gap-2 rounded-lg p-1.5 ${
+                      isFocused ? "bg-accent/10" : ""
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <div className="min-w-0 truncate">{l.product.name}</div>
+                      {isOther && (
+                        <span className="text-sub shrink-0 text-[11px]">
+                          also in this entry
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {l.product.units.length > 1 && (
+                        <select
+                          value={l.unitLabel}
+                          onChange={(e) => setLineUnit(l.key, e.target.value)}
+                          aria-label={`Unit for ${l.product.name}`}
+                          className="rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+                        >
+                          {l.product.units.map((u) => (
+                            <option key={u.label} value={u.label}>
+                              {u.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <Stepper
+                        quantity={l.quantity}
+                        onBump={(by) => bump(l.key, by)}
+                        onSet={(n) => setQuantity(l.key, n)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeLine(l.key)}
+                        className="text-danger px-1 text-lg leading-none"
+                        aria-label={`Remove ${l.product.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {resolvedLines.length === 0 && (
+                <p className="text-sub py-4 text-center text-[13px]">
+                  {isEditing
+                    ? "Search above and tap a product to add it to this delivery"
+                    : "Search above and tap a product, or start a new one"}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-3">
+              <SupplierPicker value={supplierId} onChange={setSupplierId} />
+            </div>
+
+            {error && <p className="text-danger mt-2 text-sm">{error}</p>}
+
+            {/* Removing the last line and saving deletes the entry — this is
+                that confirm, folding in how many products would go negative
+                rather than stacking a second dialog on top of it. */}
+            {warned && isDeleteViaEmptySave && (
+              <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
+                <p className="font-semibold text-danger">
+                  Removing the last line deletes this entry
+                </p>
+                {negativeProjections.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 text-[13px]">
+                    {negativeProjections.map(
+                      ({ productId, product, projected }) => (
+                        <li key={productId}>
+                          <span className="font-semibold">{product.name}</span>{" "}
+                          — currently {formatStock(product)}, deleting leaves{" "}
+                          {formatStock({
+                            ...product,
+                            quantityOnHand: projected,
+                          })}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                )}
+                <p className="mt-1.5 text-sub text-[13px]">
+                  Save again to confirm the delete.
+                </p>
+              </div>
+            )}
+
+            {/* Only when the client's own counts show the overdraw — on the
+                server-refusal path `negativeProjections` is empty and the error
+                above is the warning. */}
+            {warned &&
+              negativeProjections.length > 0 &&
+              !isDeleteViaEmptySave && (
+                <div className="mt-3 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
+                  <p className="font-semibold text-danger">
+                    This will take stock below zero
+                  </p>
+                  <ul className="mt-1 space-y-0.5 text-[13px]">
+                    {negativeProjections.map(
+                      ({ productId, product, projected }) => (
+                        <li key={productId}>
+                          <span className="font-semibold">{product.name}</span>{" "}
+                          — currently {formatStock(product)}, this edit leaves{" "}
+                          {formatStock({
+                            ...product,
+                            quantityOnHand: projected,
+                          })}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                  <p className="mt-1.5 text-sub text-[13px]">
+                    Record the edit anyway — the count is what needs fixing, not
+                    the edit. Recount these after.
+                  </p>
+                </div>
+              )}
+
+            <button
+              type="button"
+              disabled={!canSave || saving}
+              onClick={handleSave}
+              className={`mt-3.5 w-full rounded-xl py-3.5 font-bold text-accent-ink disabled:bg-[#d6d3d1] ${
+                warned ? "bg-danger" : "bg-accent"
+              }`}
+            >
+              {saving
+                ? "Saving..."
+                : warned
+                  ? isDeleteViaEmptySave
+                    ? "Delete entry"
+                    : "Record edit anyway"
+                  : isEditing
+                    ? "Save Changes"
+                    : "Save Delivery"}
+            </button>
+
+            {isEditing && (
+              <>
+                <div className="mt-2 flex gap-2">
+                  {confirmingDelete && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(false)}
+                      disabled={deleting}
+                      className="card flex-1 py-2.5 font-semibold"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className={`flex-1 rounded-xl border py-2.5 font-semibold ${
+                      confirmingDelete
+                        ? "bg-danger border-danger text-white"
+                        : "text-danger border-line"
+                    }`}
+                  >
+                    {deleting
+                      ? "Deleting..."
+                      : confirmingDelete
+                        ? "Confirm Delete"
+                        : "Delete Entry"}
+                  </button>
+                </div>
+                {confirmingDelete && deleteNegativeProjections.length > 0 && (
+                  <div className="mt-2 rounded-xl border border-danger bg-[#fef2f2] p-3 text-sm">
+                    <p className="font-semibold text-danger">
+                      This will take stock below zero
+                    </p>
+                    <ul className="mt-1 space-y-0.5 text-[13px]">
+                      {deleteNegativeProjections.map(
+                        ({ productId, product, projected }) => (
+                          <li key={productId}>
+                            <span className="font-semibold">
+                              {product.name}
+                            </span>{" "}
+                            — currently {formatStock(product)}, deleting this
+                            entry leaves{" "}
+                            {formatStock({
+                              ...product,
+                              quantityOnHand: projected,
+                            })}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
       </div>
     </div>
+  );
+}
+
+/** The − / count / + control every Line carries. */
+function Stepper({
+  quantity,
+  onBump,
+  onSet,
+}: {
+  quantity: number;
+  onBump: (by: number) => void;
+  onSet: (n: number) => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onBump(-1)}
+        className="h-7.5 w-7.5 rounded-lg border border-line bg-card"
+      >
+        −
+      </button>
+      <input
+        type="number"
+        value={quantity}
+        onChange={(e) => onSet(Math.max(1, Number(e.target.value)))}
+        className="w-14 rounded-lg border border-line bg-card px-1.5 py-1 text-center font-semibold"
+      />
+      <button
+        type="button"
+        onClick={() => onBump(1)}
+        className="h-7.5 w-7.5 rounded-lg border border-line bg-card"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Unit labels the catalog already uses. A tap fills the field beside them.
+ * The list the caller passes decides what is on offer. The two fields of the
+ * step pass different lists. See unitSuggestions.ts.
+ */
+function UnitSuggestions({
+  suggestions,
+  current,
+  onPick,
+}: {
+  suggestions: string[];
+  current: string;
+  onPick: (label: string) => void;
+}) {
+  const shown = suggestions.slice(0, 5);
+  if (shown.length === 0) return null;
+  return (
+    <>
+      <div className="text-sub mt-2 text-[12px]">
+        Already used in your catalog
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {shown.map((label) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => onPick(label)}
+            className={`rounded-full border px-2.5 py-1 text-[13px] font-semibold ${
+              current.trim().toLowerCase() === label.toLowerCase()
+                ? "border-accent bg-accent text-accent-ink"
+                : "border-line bg-card text-sub"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The step that declares a product the catalog does not hold yet. It takes the
+ * whole sheet. Each field the product needs therefore gets a bounded block of
+ * its own with a label on it. The Line it collapses into carries none of these
+ * controls.
+ * The step also sets the Unit the shipment is counted in. That is the one
+ * choice here which belongs to the Delivery and not to the product.
+ */
+function NewProductStep({
+  line,
+  mode,
+  suggestions,
+  onPatch,
+  onBump,
+  onBack,
+  onConfirm,
+}: {
+  line: NewLine;
+  mode: "create" | "edit";
+  suggestions: { baseUnits: string[]; allUnits: string[] };
+  onPatch: (fields: Partial<NewLine>) => void;
+  onBump: (by: number) => void;
+  onBack: () => void;
+  onConfirm: () => void;
+}) {
+  const unit = line.unitLabel.trim();
+  const extra = line.extraLabel.trim();
+  const extraDone = extraUnitComplete(line);
+  const perExtra = Number(line.extraEquivalent);
+  const readIn = countedIn(line);
+  const ready = isComplete(line);
+
+  return (
+    <>
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back to the delivery"
+          className="text-sub -ml-1 px-1 text-xl leading-none"
+        >
+          ‹
+        </button>
+        <h3 className="font-semibold">
+          {mode === "edit" ? line.name || "New product" : "New product"}
+        </h3>
+        <span className="pill new ml-auto">New</span>
+      </div>
+
+      <label
+        className="block text-[13px] font-semibold"
+        htmlFor="new-product-name"
+      >
+        Name
+      </label>
+      <input
+        id="new-product-name"
+        value={line.name}
+        onChange={(e) => onPatch({ name: e.target.value })}
+        className="mt-1 w-full rounded-[10px] border border-line bg-card px-3 py-2.5 text-[15px]"
+      />
+
+      <div className="mt-3 rounded-xl border border-line p-2.5">
+        <div className="text-[13px] font-semibold">Base unit</div>
+        <p className="text-sub mt-0.5 text-[12px]">
+          Every quantity this product’s stock is held in is counted in its Base
+          unit. It locks once stock has moved, so pick one fine enough that
+          everything sold comes to a whole number of it.
+        </p>
+        <input
+          value={line.unitLabel}
+          onChange={(e) => onPatch({ unitLabel: e.target.value })}
+          placeholder="sack"
+          aria-label="Base unit"
+          className="mt-1.5 w-full rounded-lg border border-line bg-card px-2.5 py-2"
+        />
+        <UnitSuggestions
+          suggestions={suggestions.baseUnits}
+          current={line.unitLabel}
+          onPick={(label) => onPatch({ unitLabel: label })}
+        />
+      </div>
+
+      <div className="mt-2 rounded-xl border border-line p-2.5">
+        <div className="text-[13px] font-semibold">
+          Price per {unit || "unit"}
+        </div>
+        <div className="mt-1.5 flex items-center rounded-lg border border-line bg-card px-2.5">
+          <span className="text-sub">₱</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={line.price}
+            onChange={(e) => onPatch({ price: e.target.value })}
+            placeholder="0"
+            aria-label="Price"
+            className="w-full bg-transparent px-1 py-2"
+          />
+        </div>
+      </div>
+
+      {/* Stock is held in the Base unit, and a shipment does not arrive in it.
+          A second Unit declared here is what lets the delivery be recorded as
+          10 trays and not 300 pieces. */}
+      {line.extraUnitOpen ? (
+        <div className="mt-2 rounded-xl border border-line p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[13px] font-semibold">Another Unit</div>
+            <button
+              type="button"
+              onClick={() =>
+                onPatch({
+                  extraUnitOpen: false,
+                  extraLabel: "",
+                  extraEquivalent: "",
+                  extraPrice: "",
+                  // The Unit this Line counted in is gone, so the count falls
+                  // back to the Base unit.
+                  recordIn: "base",
+                })
+              }
+              aria-label="Remove the second Unit"
+              className="text-danger px-1 text-lg leading-none"
+            >
+              ×
+            </button>
+          </div>
+          <div className="mt-1.5 flex gap-2">
+            <div className="flex-1">
+              <div className="text-sub text-[12px]">Unit</div>
+              <input
+                value={line.extraLabel}
+                onChange={(e) => onPatch({ extraLabel: e.target.value })}
+                placeholder="tray"
+                aria-label="Second Unit"
+                className="mt-0.5 w-full rounded-lg border border-line bg-card px-2 py-1.5"
+              />
+            </div>
+            <div className="flex-1">
+              <div className="text-sub truncate text-[12px]">
+                = how many {unit || "base"}
+              </div>
+              <input
+                type="number"
+                inputMode="numeric"
+                value={line.extraEquivalent}
+                onChange={(e) => onPatch({ extraEquivalent: e.target.value })}
+                placeholder="30"
+                aria-label={`How many ${unit || "base units"} in one ${extra || "unit"}`}
+                className="mt-0.5 w-full rounded-lg border border-line bg-card px-2 py-1.5"
+              />
+            </div>
+            <div className="w-24">
+              <div className="text-sub text-[12px]">Price</div>
+              <div className="mt-0.5 flex items-center rounded-lg border border-line bg-card px-2">
+                <span className="text-sub">₱</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={line.extraPrice}
+                  onChange={(e) => onPatch({ extraPrice: e.target.value })}
+                  placeholder="optional"
+                  aria-label={`Price per ${extra || "unit"}`}
+                  className="w-full bg-transparent px-1 py-1.5"
+                />
+              </div>
+            </div>
+          </div>
+          <UnitSuggestions
+            suggestions={suggestions.allUnits}
+            current={line.extraLabel}
+            onPick={(label) => onPatch({ extraLabel: label })}
+          />
+          {extraDone && (
+            <p className="text-sub mt-2 text-[12px]">
+              1 {extra} = {formatCount(perExtra, unit || "base unit")}
+              {/* A blank price box gives the Unit the Base unit's price at
+                  this Base equivalence. The figure shows here, so nobody
+                  meets a price they did not type. */}
+              {extraUnitPrice(line) === undefined &&
+                `, and sells for ₱${roundCentavos(Number(line.price) * perExtra)}`}
+            </p>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onPatch({ extraUnitOpen: true })}
+          className="text-accent mt-2 w-full rounded-xl border border-dashed border-line p-2.5 text-left text-[13px] font-semibold"
+        >
+          + Add another Unit
+          <span className="text-sub block font-normal text-[12px]">
+            Deliveries usually arrive in bulk. Add the Unit this one comes in —
+            a tray, a sack, a case — and record {unit || "the stock"} by it
+            instead.
+          </span>
+        </button>
+      )}
+
+      <div className="mt-2 rounded-xl border border-line p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[13px] font-semibold">
+            Arriving on this delivery
+          </div>
+          <Stepper
+            quantity={line.quantity}
+            onBump={onBump}
+            onSet={(n) => onPatch({ quantity: n })}
+          />
+        </div>
+        {/* The count above is read in whichever Unit is picked here. The
+            Base-unit echo underneath is what stops "10 trays" from being
+            entered as a guess. */}
+        {extraDone && (
+          <>
+            <div className="mt-2 flex gap-1.5">
+              {[
+                { key: "extra" as const, label: extra },
+                { key: "base" as const, label: unit },
+              ].map((choice) => (
+                <button
+                  key={choice.key}
+                  type="button"
+                  onClick={() => onPatch({ recordIn: choice.key })}
+                  className={`flex-1 rounded-lg border px-2.5 py-1.5 text-[13px] font-semibold ${
+                    line.recordIn === choice.key
+                      ? "border-accent bg-accent text-accent-ink"
+                      : "border-line bg-card text-sub"
+                  }`}
+                >
+                  {unitLabelFor(line.quantity, choice.label)}
+                </button>
+              ))}
+            </div>
+            <p className="text-sub mt-1.5 text-[12px]">
+              {formatCount(line.quantity, readIn)}
+              {line.recordIn === "extra" &&
+                ` = ${formatCount(line.quantity * perExtra, unit)} on hand`}
+            </p>
+          </>
+        )}
+      </div>
+
+      <button
+        type="button"
+        disabled={!ready}
+        onClick={onConfirm}
+        className="mt-3.5 w-full rounded-xl bg-accent py-3.5 font-bold text-accent-ink disabled:bg-[#d6d3d1]"
+      >
+        {mode === "edit"
+          ? "Save changes"
+          : ready
+            ? `Add ${formatCount(line.quantity, readIn)} to the delivery`
+            : "Add to the delivery"}
+      </button>
+    </>
   );
 }
