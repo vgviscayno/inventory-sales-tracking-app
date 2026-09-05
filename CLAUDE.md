@@ -12,7 +12,7 @@ Everything else — branch cuts, landing a project, promoting `dev` to `main`, t
 
 ### Issue tracker
 
-Linear — issues live in Linear, reached via the Linear MCP connector. See `docs/agents/issue-tracker.md`.
+GitHub Issues — issues live in this repo's GitHub Issues, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
