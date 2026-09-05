@@ -1,6 +1,6 @@
 ## Summary
 
-<!-- What does this PR do? Keep it brief - the Linear ticket has the details -->
+<!-- What does this PR do? Keep it brief - the issue has the details -->
 
 ## Demo
 
@@ -20,7 +20,7 @@
 <details>
 <summary>Checklist</summary>
 
-- [ ] Branch name matches Linear ticket (e.g., `feat/ABC-123-description`)
+- [ ] Branch name matches the issue (e.g., `123-short-description`)
 - [ ] Types pass (`yarn turbo type-check`)
 - [ ] Posted to #code-review in Slack
 

@@ -9,7 +9,7 @@ Where a branch is cut from depends on what it is:
 
 | Work | Branch off | Lands on |
 | --- | --- | --- |
-| Build ticket (Linear `build` label) | the project branch | the project branch, squash-merged |
+| Build ticket (`build` label) | the project branch | the project branch, squash-merged |
 | A whole build project | `dev`, once, at its first build ticket | `dev`, once, fast-forward |
 | Pre-build discovery (`prototype` / `grilling`) | `dev` | nowhere — deleted |
 | Mid-build discovery | the project branch tip | nowhere — deleted |
@@ -33,7 +33,7 @@ Two consequences for anyone testing on a preview:
 
 ## Project branches
 
-A Linear project whose tickets carry the `build` label gets a long-lived **project branch**, named `project/<short-slug>` — e.g. `project/stock-movements`. The slug is hand-picked and deliberately unlike Linear's generated branch names, so the integration line stands out in `git branch`.
+A **build project** — a tracking issue whose sub-issues carry the `build` label — gets a long-lived **project branch**, named `project/<short-slug>` — e.g. `project/stock-movements`. The slug is hand-picked and deliberately unlike the branch names GitHub generates from an issue, so the integration line stands out in `git branch`.
 
 The project branch is a **feature integration line**, not merely a stable base. Build work accumulates on it and `dev` sees the feature only once, whole. The full chain is:
 
@@ -58,7 +58,7 @@ git merge dev
 
 One ticket at a time. Cut from the project branch **tip**, finish it, merge it back, then cut the next — so each ticket sees all prior tickets' work.
 
-Use Linear's generated branch name verbatim, e.g. `viscaynovonrieinventory/inv-23-build-02-ledger-foundation-and-sale-cutover`.
+Use the branch name GitHub generates from the issue verbatim, e.g. `23-build-02-ledger-foundation-and-sale-cutover`.
 
 Land it by PR into the project branch, **squash-merged** — one commit per build ticket. Delete the ticket branch on merge.
 
@@ -87,7 +87,7 @@ Non-feature work — repo docs, tooling, unrelated bug fixes — branches off `d
 
 Pre-build `prototype` / `grilling` tickets branch off `dev`, as always. A discovery ticket raised *mid-build* is cut from the project branch tip instead, so it can exercise the accumulated build work.
 
-Neither is ever merged back. The answer lands in Linear; the code is deleted when the Linear ticket is Done.
+Neither is ever merged back. The answer lands on the issue as a comment; the code is deleted when the issue is closed.
 
 ## Commits
 

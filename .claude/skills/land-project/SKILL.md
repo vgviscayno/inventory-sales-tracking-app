@@ -8,9 +8,9 @@ disable-model-invocation: true
 
 Landing early is not allowed — see [`docs/git-workflow.md`](../../../docs/git-workflow.md) for why. This skill enforces that gate; it doesn't restate the workflow around it.
 
-1. **Identify the project branch.** If not given, search Linear projects for the `project/<slug>` marker in their description and confirm with the user which one.
+1. **Identify the project branch.** If not given, search open tracking issues for the `project/<slug>` marker in their body — `gh issue list --state open --json number,title,body --jq '[.[] | select(.body | test("project/"))]'` — and confirm with the user which one.
 
-2. **Check the gate.** Fetch every issue in the Linear project carrying the `build` label. If any is not Done, **stop** — list what's outstanding and don't proceed. Something genuinely urgent takes the escape hatch instead, not an early landing.
+2. **Check the gate.** Fetch every sub-issue of the tracking issue carrying the `build` label. If any is still open, **stop** — list what's outstanding and don't proceed. Something genuinely urgent takes the escape hatch instead, not an early landing.
 
 3. **Final sync.** `git checkout project/<slug> && git merge dev`. Resolve any conflicts (hand off to `resolving-merge-conflicts` if needed), then run the project's checks (typecheck, tests) on the synced branch.
 

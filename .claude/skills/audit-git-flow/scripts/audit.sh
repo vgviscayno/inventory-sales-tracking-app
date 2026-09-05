@@ -51,7 +51,7 @@ else
     # Not based on any live project branch. This is a heuristic, not proof: a
     # branch cut straight from dev (escape hatch, pre-build discovery) looks
     # the same once dev has moved on past where it was cut. Report it as a
-    # candidate for a human to check against Linear, don't fail the audit on it.
+    # candidate for a human to check against the issue tracker, don't fail the audit on it.
     if [ "$based_on_a_project" -eq 0 ]; then
       echo "CANDIDATE — $b (no live project/* branch is an ancestor)"
       any_candidate=1
