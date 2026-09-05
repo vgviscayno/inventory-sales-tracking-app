@@ -15,6 +15,9 @@
       "AskUserQuestion"
     ]
   },
+  "worktree": {
+    "bgIsolation": "none"
+  },
   "disableClaudeAiConnectors": true,
   "disableWorkflows": true,
   "disableBundledSkills": true,
