@@ -16,6 +16,6 @@ Invocation splits on blast radius. `cut-branch` and `audit-git-flow` are model-i
 
 ## Consequences
 
-- Branch-to-Linear-project mapping has no mechanical path (`docs/git-workflow.md` says the `project/<slug>` name is deliberately unlike Linear's generated names), so `cut-branch` writes the branch name into the Linear project's description as a marker, and `land-project` reads it back to find its gate.
+- Branch-to-project mapping has no mechanical path (`docs/git-workflow.md` says the `project/<slug>` name is deliberately unlike the branch names GitHub generates from an issue), so `cut-branch` appends the branch name to the tracking issue's body as a marker, and `land-project` reads it back to find its gate.
 - `audit-git-flow`'s checks are deterministic git maths, so they live in `scripts/audit.sh` inside the skill directory; the skill interprets the output and proposes fixes, never applies them.
 - `promote-to-main` diagnoses why a `--ff-only` was rejected (a topology problem, not necessarily a conflict) and prescribes the rebase; if that rebase conflicts, it hands off to `resolving-merge-conflicts` rather than reimplementing conflict resolution.

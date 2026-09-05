@@ -2,7 +2,7 @@
 
 **Status:** accepted
 
-A Linear project whose tickets carry the `build` label gets a long-lived **project branch**, `project/<short-slug>` (e.g. `project/stock-movements`). Build ticket branches are cut from it and squash-merged back into it; the project branch lands on `dev` exactly once, fast-forward, when every build ticket in the project is done. The full chain is **ticket branch → project branch → `dev` → `main`**, fast-forward at both ends.
+A build project whose tickets carry the `build` label gets a long-lived **project branch**, `project/<short-slug>` (e.g. `project/stock-movements`). Build ticket branches are cut from it and squash-merged back into it; the project branch lands on `dev` exactly once, fast-forward, when every build ticket in the project is done. The full chain is **ticket branch → project branch → `dev` → `main`**, fast-forward at both ends.
 
 The reason is that a build project is a feature delivered in eleven slices, and `dev` deploys to Vercel Preview. Landing slices on `dev` as they finish means `dev` — and, since `main` fast-forwards from `dev`, potentially production — carries a half-cut-over ledger for weeks. The project branch is a **feature integration line**: build work accumulates there, and `dev` sees the feature only once, whole.
 
@@ -23,5 +23,5 @@ The mechanics are written up in [`docs/git-workflow.md`](../git-workflow.md); th
 - **The escape hatch matters.** Non-feature work — repo docs, tooling, unrelated bug fixes — branches off `dev` and lands on `dev` directly, never touching the project branch, which picks it up on its next sync. Without this, unrelated work is held hostage for the length of the project. This is not hypothetical: `build/01-test-harness` accumulated three repo-wide docs commits (the Linear migration, retiring `.scratch`, the spec and its eleven tickets) that had nothing to do with a test harness, which is what motivated the rule.
 - **Build tickets run one at a time.** Each is cut from the project branch tip, so it sees all prior tickets' work. This is a deliberate serialisation — the slices of a cutover depend on each other.
 - **One commit per build ticket** on the project branch, via squash merge. The project branch's history reads as the feature's slices, not as the churn inside each one.
-- **Discovery tickets are unaffected before build starts** (`prototype`/`grilling` branches off `dev`, as today) but change during it: a mid-build discovery ticket is cut from the project branch tip so it can exercise accumulated build work, and is **never merged back**. Its answer lands in Linear; its code is deleted.
+- **Discovery tickets are unaffected before build starts** (`prototype`/`grilling` branches off `dev`, as today) but change during it: a mid-build discovery ticket is cut from the project branch tip so it can exercise accumulated build work, and is **never merged back**. Its answer lands on the issue as a comment; its code is deleted.
 - **This is process vocabulary, not domain vocabulary.** It belongs here and in `git-workflow.md`. It deliberately does not go in `CONTEXT.md`, which is reserved for inventory/sales domain terms.
